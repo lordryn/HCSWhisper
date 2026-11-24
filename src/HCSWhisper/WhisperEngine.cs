@@ -90,20 +90,17 @@ namespace HCSWhisper
                 });
                 _loadedModelName = fileName;
 
-                // Warm up GPU shaders on a short buffer so the very first voice command is <90ms
+                // Warm up GPU shaders at audio_ctx=512 (~10s window: ~135-165ms latency with zero decoder looping!)
                 using var warmupProc = _factory.CreateBuilder()
                     .WithLanguage("en")
                     .WithNoContext()
                     .WithSingleSegment()
-                    .WithAudioContextSize(160)
+                    .WithAudioContextSize(512)
                     .WithMaxTokensPerSegment(16)
-                    .WithTemperature(0f)
-                    .WithTemperatureInc(0f)
-                    .WithGreedySamplingStrategy()
                     .WithPrompt(initialPrompt ?? "")
                     .Build();
 
-                float[] warmAudio = new float[12000];
+                float[] warmAudio = new float[16000];
                 await foreach (var _ in warmupProc.ProcessAsync(warmAudio, ct).ConfigureAwait(false)) { }
 
                 _log?.Invoke($"HCSWhisper ready: model '{modelName}' loaded on {ActiveBackend} in {sw.ElapsedMilliseconds} ms", "green");
@@ -143,9 +140,9 @@ namespace HCSWhisper
                     Array.Copy(samples16k, input, samples16k.Length);
                 }
 
-                // Scale encoder context dynamically to utterance duration instead of 30s default (5-8x faster!)
+                // audio_ctx=512 (~10.2s capacity) avoids positional-embedding repetition loops while running ~2.5x faster than 1500
                 double seconds = input.Length / 16000.0;
-                int audioCtx = Math.Clamp(((int)Math.Ceiling(seconds / 30.0 * 1500.0) + 64 + 31) & ~31, 128, 1500);
+                int audioCtx = seconds <= 8.5 ? 512 : 1500;
 
                 var sw = Stopwatch.StartNew();
                 using var processor = _factory.CreateBuilder()
@@ -153,11 +150,8 @@ namespace HCSWhisper
                     .WithNoContext()
                     .WithSingleSegment()
                     .WithAudioContextSize(audioCtx)
-                    .WithMaxTokensPerSegment(24)
-                    .WithTemperature(0f)
-                    .WithTemperatureInc(0f)
+                    .WithMaxTokensPerSegment(20)
                     .WithNoSpeechThreshold(0.65f)
-                    .WithGreedySamplingStrategy()
                     .WithPrompt(prompt ?? "")
                     .Build();
 

@@ -236,9 +236,9 @@ namespace HCSWhisper
             _cbModel = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = BgDark, ForeColor = TextPrimary };
             _cbModel.Items.AddRange(new object[]
             {
-                "base.en  — Ultra-Fast (~60 ms, Recommended)",
-                "small.en — Extra-High Accuracy (~95 ms)",
-                "tiny.en  — Featherweight (~35 ms, Low VRAM)"
+                "base.en  — Fast & Accurate (~140 ms, Recommended)",
+                "small.en — Extra-High Accuracy (~240 ms)",
+                "tiny.en  — Ultra-Light (~85 ms, Low VRAM)"
             });
             _cbModel.SelectedIndex = (_config.ModelName ?? "base.en").ToLowerInvariant() switch
             {
@@ -281,7 +281,7 @@ namespace HCSWhisper
             // 4. Live Recognition Feed
             var logCard = CreateCard(new Padding(10));
             logCard.Dock = DockStyle.Fill;
-            var lblLogHeader = new Label { Text = "Live Recognition & HCS Command Feed", Dock = DockStyle.Top, Height = 22, ForeColor = TextMuted, Font = new Font("Segoe UI Semibold", 9f) };
+            var lblLogHeader = new Label { Text = "Live Recognition & HCS Command Feed", UseMnemonic = false, Dock = DockStyle.Top, Height = 22, ForeColor = TextMuted, Font = new Font("Segoe UI Semibold", 9f) };
             _rtbLog = new RichTextBox
             {
                 Dock = DockStyle.Fill,

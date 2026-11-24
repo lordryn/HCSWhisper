@@ -581,7 +581,48 @@ namespace HCSWhisper
                     outTokens.Add(t);
             }
 
-            return MultiSpaceRegex.Replace(string.Join(" ", outTokens), " ").Trim();
+            string result = MultiSpaceRegex.Replace(string.Join(" ", outTokens), " ").Trim();
+            return CollapseRepetitionLoop(result);
+        }
+
+        private static string CollapseRepetitionLoop(string canonical)
+        {
+            string[] words = canonical.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length < 4)
+                return canonical;
+
+            // Detect n-gram phrase repetition loops (e.g., "open map open map open map" -> "open map")
+            for (int patLen = 1; patLen <= Math.Min(5, words.Length / 2); patLen++)
+            {
+                int repeats = 1;
+                int idx = patLen;
+                while (idx + patLen <= words.Length)
+                {
+                    bool same = true;
+                    for (int k = 0; k < patLen; k++)
+                    {
+                        if (!string.Equals(words[k], words[idx + k], StringComparison.Ordinal))
+                        {
+                            same = false;
+                            break;
+                        }
+                    }
+                    if (!same) break;
+                    repeats++;
+                    idx += patLen;
+                }
+
+                // If repeated >= 3 times (or >= 2 times covering almost the whole string, excluding "eject eject eject"!)
+                if (repeats >= 2 && idx >= words.Length - patLen)
+                {
+                    if (patLen == 1 && string.Equals(words[0], "eject", StringComparison.Ordinal) && repeats == 3)
+                        return canonical; // Keep intentional "eject eject eject" intact!
+                    if (repeats >= 3 || (repeats == 2 && patLen >= 2))
+                        return string.Join(" ", words, 0, patLen);
+                }
+            }
+
+            return canonical;
         }
 
         private static string StripConversationalFillers(string canonical)

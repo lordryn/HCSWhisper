@@ -39,7 +39,7 @@ irm https://raw.githubusercontent.com/lordryn/HCSWhisper/main/install.ps1 | iex
 ```
 
 ### Option 3 — Manual Zip Install
-1. Download **`HCSWhisper-v1.0.0-win-x64.zip`** from [Releases](https://github.com/lordryn/HCSWhisper/releases/latest).
+1. Download **`HCSWhisper-win-x64.zip`** from [Releases](https://github.com/lordryn/HCSWhisper/releases/latest).
 2. Extract the `HCSWhisper` folder into your `VoiceAttack 2\Apps\` directory (so `VoiceAttack 2\Apps\HCSWhisper\HCSWhisper.dll` exists).
 
 ---
@@ -82,7 +82,7 @@ git clone https://github.com/lordryn/HCSWhisper.git
 cd HCSWhisper
 powershell -ExecutionPolicy Bypass -File .\scripts\Build-Release.ps1
 ```
-Produces `dist\HCSWhisper\` and `dist\HCSWhisper-v1.0.0-win-x64.zip`.
+Produces `dist\HCSWhisper\` and `dist\HCSWhisper-win-x64.zip`.
 
 ---
 

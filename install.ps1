@@ -4,7 +4,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $RepoOwner = "lordryn"
 $RepoName  = "HCSWhisper"
-$AssetName = "HCSWhisper-v1.0.0-win-x64.zip"
+$AssetName = "HCSWhisper-win-x64.zip"
 $DownloadUrl = "https://github.com/$RepoOwner/$RepoName/releases/latest/download/$AssetName"
 $ModelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
 

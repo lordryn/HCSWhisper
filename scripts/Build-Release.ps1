@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.1"
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -8,9 +8,12 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $srcDir = Join-Path $repoRoot "src\HCSWhisper"
 $pkgDir = Join-Path $repoRoot "packages"
 $distPluginDir = Join-Path $repoRoot "dist\HCSWhisper"
-$zipOutPath = Join-Path $repoRoot "dist\HCSWhisper-v$Version-win-x64.zip"
+$engineStageDir = Join-Path $repoRoot "dist\engine_stage"
+$zipOutPath = Join-Path $repoRoot "dist\HCSWhisper-win-x64.zip"
 
-New-Item -ItemType Directory -Force -Path $pkgDir, $distPluginDir | Out-Null
+if (Test-Path $distPluginDir) { Remove-Item -Recurse -Force $distPluginDir }
+if (Test-Path $engineStageDir) { Remove-Item -Recurse -Force $engineStageDir }
+New-Item -ItemType Directory -Force -Path $pkgDir, $distPluginDir, $engineStageDir | Out-Null
 
 # Locate VoiceAttack 2 (for Roslyn + NAudio compile references if .NET SDK isn't installed)
 $va2Candidates = @(
@@ -189,15 +192,20 @@ Write-Host "Compiling HCSWhisper.dll (net8.0-windows)..."
 if ($LASTEXITCODE -ne 0) { throw "Compilation failed!" }
 Remove-Item -Recurse -Force $buildTmp
 
-# Stage runtime dependencies into dist\HCSWhisper
-Copy-Item -Force "$pkgDir\whisper.net\lib\net8.0\Whisper.net.dll" "$distPluginDir\"
-Copy-Item -Force "$pkgDir\microsoft.extensions.ai.abstractions\lib\net8.0\Microsoft.Extensions.AI.Abstractions.dll" "$distPluginDir\"
+# Pack native & third-party runtime DLLs into engine.pak so VoiceAttack's recursive *.dll scanner
+# in Apps\ only ever sees HCSWhisper.dll (preventing out-of-order LoadLibrary on native ggml DLLs!)
+Copy-Item -Force "$pkgDir\whisper.net\lib\net8.0\Whisper.net.dll" "$engineStageDir\"
+Copy-Item -Force "$pkgDir\microsoft.extensions.ai.abstractions\lib\net8.0\Microsoft.Extensions.AI.Abstractions.dll" "$engineStageDir\"
 
-New-Item -ItemType Directory -Force -Path "$distPluginDir\runtimes\vulkan\win-x64", "$distPluginDir\runtimes\win-x64" | Out-Null
-Copy-Item -Force "$pkgDir\whisper.net.runtime.vulkan\build\win-x64\*" "$distPluginDir\runtimes\vulkan\win-x64\"
-Copy-Item -Force "$pkgDir\whisper.net.runtime\build\win-x64\*" "$distPluginDir\runtimes\win-x64\"
+New-Item -ItemType Directory -Force -Path "$engineStageDir\runtimes\vulkan\win-x64", "$engineStageDir\runtimes\win-x64" | Out-Null
+Copy-Item -Force "$pkgDir\whisper.net.runtime.vulkan\build\win-x64\*" "$engineStageDir\runtimes\vulkan\win-x64\"
+Copy-Item -Force "$pkgDir\whisper.net.runtime\build\win-x64\*" "$engineStageDir\runtimes\win-x64\"
+
+$pakOut = Join-Path $distPluginDir "engine.pak"
+[System.IO.Compression.ZipFile]::CreateFromDirectory($engineStageDir, $pakOut, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+Remove-Item -Recurse -Force $engineStageDir
 
 if (Test-Path $zipOutPath) { Remove-Item -Force $zipOutPath }
-[System.IO.Compression.ZipFile]::CreateFromDirectory($distPluginDir, $zipOutPath, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+[System.IO.Compression.ZipFile]::CreateFromDirectory($distPluginDir, $zipOutPath, [System.IO.Compression.CompressionLevel]::NoCompression, $true)
 $zipMb = [Math]::Round((Get-Item $zipOutPath).Length / 1MB, 2)
-Write-Host "Built HCSWhisper successfully! Release zip: $zipOutPath ($zipMb MB)"
+Write-Host "Built HCSWhisper v$Version successfully! Release zip: $zipOutPath ($zipMb MB)"

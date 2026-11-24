@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading;
@@ -11,36 +12,82 @@ namespace HCSWhisper
 {
     /// <summary>
     /// VoiceAttack 2 Plugin Entry Point.
-    /// Uses static AssemblyLoadContext resolution before HcsWhisperRuntime is JIT-compiled
-    /// so bundled dependencies (Whisper.net, MEAI) load cleanly inside VA2's isolated plugin context.
+    /// Keeps native C++ GGML/Vulkan DLLs packed inside engine.pak and extracts them to
+    /// %LOCALAPPDATA%\HCSWhisper\engine so VoiceAttack's recursive Apps\*.dll scanner
+    /// never calls LoadLibrary on unmanaged C++ runtime DLLs out of order.
     /// </summary>
     public class HcsWhisperPlugin
     {
+        private const string EngineBundleVersion = "1.0.1";
         private static readonly string PluginDir;
+        private static readonly string EngineDir;
 
         static HcsWhisperPlugin()
         {
             PluginDir = Path.GetDirectoryName(typeof(HcsWhisperPlugin).Assembly.Location)
                         ?? Path.Combine(AppContext.BaseDirectory, "Apps", "HCSWhisper");
+            EngineDir = EnsureEngineExtracted(PluginDir);
 
             var alc = AssemblyLoadContext.GetLoadContext(typeof(HcsWhisperPlugin).Assembly);
             if (alc != null)
             {
-                alc.Resolving += (_, name) => TryLoadSiblingAssembly(name);
+                alc.Resolving += (_, name) => TryLoadDependency(name);
             }
-            AppDomain.CurrentDomain.AssemblyResolve += (_, args) => TryLoadSiblingAssembly(new AssemblyName(args.Name));
+            AppDomain.CurrentDomain.AssemblyResolve += (_, args) => TryLoadDependency(new AssemblyName(args.Name));
         }
 
-        private static Assembly TryLoadSiblingAssembly(AssemblyName name)
+        private static string EnsureEngineExtracted(string pluginDir)
+        {
+            string engineDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "HCSWhisper", "engine");
+            Directory.CreateDirectory(engineDir);
+
+            string pakPath = Path.Combine(pluginDir, "engine.pak");
+            string stampPath = Path.Combine(engineDir, ".bundle-version");
+
+            try
+            {
+                if (File.Exists(pakPath))
+                {
+                    string pakStamp = $"{EngineBundleVersion}:{new FileInfo(pakPath).Length}";
+                    bool upToDate = File.Exists(stampPath) &&
+                                    string.Equals(File.ReadAllText(stampPath).Trim(), pakStamp, StringComparison.Ordinal) &&
+                                    File.Exists(Path.Combine(engineDir, "Whisper.net.dll"));
+
+                    if (!upToDate)
+                    {
+                        if (Directory.Exists(engineDir))
+                        {
+                            try { Directory.Delete(engineDir, recursive: true); } catch { }
+                            Directory.CreateDirectory(engineDir);
+                        }
+                        ZipFile.ExtractToDirectory(pakPath, engineDir, overwriteFiles: true);
+                        File.WriteAllText(stampPath, pakStamp);
+                    }
+                }
+            }
+            catch
+            {
+                // If already extracted and locked by another instance, continue using existing EngineDir
+            }
+
+            return engineDir;
+        }
+
+        private static Assembly TryLoadDependency(AssemblyName name)
         {
             if (string.IsNullOrEmpty(name?.Name))
                 return null;
 
-            string candidate = Path.Combine(PluginDir, name.Name + ".dll");
-            if (File.Exists(candidate))
+            foreach (string folder in new[] { EngineDir, PluginDir })
             {
-                var alc = AssemblyLoadContext.GetLoadContext(typeof(HcsWhisperPlugin).Assembly);
-                return alc != null ? alc.LoadFromAssemblyPath(candidate) : Assembly.LoadFrom(candidate);
+                string candidate = Path.Combine(folder, name.Name + ".dll");
+                if (File.Exists(candidate))
+                {
+                    var alc = AssemblyLoadContext.GetLoadContext(typeof(HcsWhisperPlugin).Assembly);
+                    return alc != null ? alc.LoadFromAssemblyPath(candidate) : Assembly.LoadFrom(candidate);
+                }
             }
 
             string vaRootCandidate = Path.Combine(AppContext.BaseDirectory, name.Name + ".dll");
@@ -55,7 +102,7 @@ namespace HCSWhisper
         public static string VA_DisplayName() => "HCSWhisper AI Speech Engine";
 
         public static string VA_DisplayInfo() =>
-            "HCSWhisper v1.0.0 — GPU-accelerated Whisper speech engine built for HCS Voice Packs (Star Citizen, Elite Dangerous & more).";
+            "HCSWhisper v1.0.1 — GPU-accelerated Whisper speech engine built for HCS Voice Packs (Star Citizen, Elite Dangerous & more).";
 
         public static Guid VA_Id() => new("{8E47C9A1-5F2B-4D8E-9A31-7C64E0B51F29}");
 
@@ -66,7 +113,7 @@ namespace HCSWhisper
 
         public static void VA_Init1(dynamic vaProxy)
         {
-            HcsWhisperRuntime.Initialize(vaProxy, PluginDir);
+            HcsWhisperRuntime.Initialize(vaProxy, PluginDir, EngineDir);
         }
 
         public static void VA_Invoke1(dynamic vaProxy)
@@ -98,7 +145,7 @@ namespace HCSWhisper
         private static Guid? _lastProfileId;
         private static CancellationTokenSource _shutdownCts;
 
-        public static void Initialize(dynamic vaProxy, string pluginDir)
+        public static void Initialize(dynamic vaProxy, string pluginDir, string engineDir)
         {
             _proxy = vaProxy;
             _pluginDir = pluginDir;
@@ -106,7 +153,7 @@ namespace HCSWhisper
 
             _config = HcsConfig.Load();
             _triggerIndex = new HcsTriggerIndex();
-            _whisper = new WhisperEngine(pluginDir, LogToVaAndUi);
+            _whisper = new WhisperEngine(engineDir, LogToVaAndUi);
             _audio = new AudioCaptureEngine(_config, IsCrewAudioPlaying, LogToVaAndUi);
 
             _audio.RecordingStateChanged += OnRecordingStateChanged;

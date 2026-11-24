@@ -31,11 +31,11 @@ namespace HCSWhisper
         public string ActiveBackend => RuntimeOptions.LoadedLibrary?.ToString() ?? "Initializing";
         public bool IsReady => _factory != null;
 
-        public WhisperEngine(string pluginDir, Action<string, string> log)
+        public WhisperEngine(string engineDir, Action<string, string> log)
         {
-            _pluginDir = pluginDir;
+            _pluginDir = engineDir;
             _log = log;
-            EnsureRuntimeConfigured(pluginDir);
+            EnsureRuntimeConfigured(engineDir);
         }
 
         private static void EnsureRuntimeConfigured(string pluginDir)
@@ -86,7 +86,7 @@ namespace HCSWhisper
                 _factory = WhisperFactory.FromPath(modelPath, new WhisperFactoryOptions
                 {
                     UseGpu = true,
-                    UseFlashAttention = true
+                    UseFlashAttention = false
                 });
                 _loadedModelName = fileName;
 

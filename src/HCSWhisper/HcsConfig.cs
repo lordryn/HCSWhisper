@@ -40,6 +40,16 @@ namespace HCSWhisper
             }
         }
 
+        public static string EngineDir
+        {
+            get
+            {
+                string dir = Path.Combine(DataDir, "engine");
+                Directory.CreateDirectory(dir);
+                return dir;
+            }
+        }
+
         public static string ConfigFilePath => Path.Combine(DataDir, "config.json");
 
         public static HcsConfig Load()

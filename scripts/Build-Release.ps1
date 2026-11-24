@@ -1,11 +1,12 @@
 param(
-    [string]$Version = "1.0.1"
+    [string]$Version = "1.0.2"
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$srcDir = Join-Path $repoRoot "src\HCSWhisper"
+$coreSrcDir = Join-Path $repoRoot "src\HCSWhisper"
+$loaderSrcDir = Join-Path $repoRoot "src\HCSWhisper.Loader"
 $pkgDir = Join-Path $repoRoot "packages"
 $distPluginDir = Join-Path $repoRoot "dist\HCSWhisper"
 $engineStageDir = Join-Path $repoRoot "dist\engine_stage"
@@ -15,7 +16,6 @@ if (Test-Path $distPluginDir) { Remove-Item -Recurse -Force $distPluginDir }
 if (Test-Path $engineStageDir) { Remove-Item -Recurse -Force $engineStageDir }
 New-Item -ItemType Directory -Force -Path $pkgDir, $distPluginDir, $engineStageDir | Out-Null
 
-# Locate VoiceAttack 2 (for Roslyn + NAudio compile references if .NET SDK isn't installed)
 $va2Candidates = @(
     "C:\Program Files (x86)\Steam\steamapps\common\VoiceAttack 2",
     "C:\Program Files\VoiceAttack 2",
@@ -25,7 +25,6 @@ $va2Candidates = @(
 $va2Dir = $va2Candidates | Where-Object { Test-Path (Join-Path $_ "VoiceAttack.dll") } | Select-Object -First 1
 if (-not $va2Dir) { throw "VoiceAttack 2 installation not found for reference assemblies." }
 
-# Ensure NuGet dependencies are fetched
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $nugetSpecs = @(
     @{ Id = "whisper.net"; Ver = "1.9.1" },
@@ -43,7 +42,6 @@ foreach ($spec in $nugetSpecs) {
     }
 }
 
-# Locate .NET 8 Runtime & WindowsDesktop shared frameworks
 $net8CoreDir = Get-ChildItem "C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.*" | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
 $net8DeskDir = Get-ChildItem "C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App\8.0.*" | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
 if (-not $net8CoreDir -or -not $net8DeskDir) { throw ".NET 8 Desktop Runtime not found." }
@@ -79,9 +77,10 @@ class Program
         string va2Dir = args[0];
         string netCoreDir = args[1];
         string netDeskDir = args[2];
-        string srcDir = args[3];
-        string outDll = args[4];
-        string[] extraDlls = args.Skip(5).ToArray();
+        string asmName = args[3];
+        string srcDir = args[4];
+        string outDll = args[5];
+        string[] extraDlls = args.Skip(6).ToArray();
 
         AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
         {
@@ -131,7 +130,6 @@ class Program
             if (!seenFileNames.Add(fn)) continue;
             try
             {
-                // Skip native (non-CLI metadata) DLLs cleanly
                 AssemblyName.GetAssemblyName(dll);
                 refsList.Add(Call(createFromFile, null, dll));
             }
@@ -152,7 +150,7 @@ class Program
         MethodInfo createComp = cs.GetType("Microsoft.CodeAnalysis.CSharp.CSharpCompilation")
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
             .First(m => m.Name == "Create" && m.GetParameters().Length == 4 && m.GetParameters()[0].ParameterType == typeof(string));
-        object comp = createComp.Invoke(null, new object[] { "HCSWhisper", treesArr, refsList, opts });
+        object comp = createComp.Invoke(null, new object[] { asmName, treesArr, refsList, opts });
 
         MethodInfo emitMethod = comp.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy)
             .First(m => m.Name == "Emit" && m.GetParameters()[0].ParameterType == typeof(Stream));
@@ -179,21 +177,27 @@ Set-Content "$buildTmp\Driver.runtimeconfig.json" '{"runtimeOptions":{"tfm":"net
 
 & "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /out:"$buildTmp\Driver.dll" /target:exe "$buildTmp\Driver.cs"
 
-$outDll = Join-Path $distPluginDir "HCSWhisper.dll"
+# 1. Compile HCSWhisper.Core.dll (contains Whisper.net, NAudio, UI, HCS matcher -> goes inside engine.pak!)
+$coreDll = Join-Path $engineStageDir "HCSWhisper.Core.dll"
 $extraRefs = @(
     (Join-Path $pkgDir "whisper.net\lib\net8.0\Whisper.net.dll"),
     (Join-Path $pkgDir "microsoft.extensions.ai.abstractions\lib\net8.0\Microsoft.Extensions.AI.Abstractions.dll"),
     (Join-Path $va2Dir "NAudio.Core.dll"),
     (Join-Path $va2Dir "NAudio.Wasapi.dll")
 )
+Write-Host "Compiling HCSWhisper.Core.dll..."
+& "C:\Program Files\dotnet\dotnet.exe" "$buildTmp\Driver.dll" "$va2Dir" "$net8CoreDir" "$net8DeskDir" "HCSWhisper.Core" "$coreSrcDir" "$coreDll" @extraRefs
+if ($LASTEXITCODE -ne 0) { throw "HCSWhisper.Core compilation failed!" }
 
-Write-Host "Compiling HCSWhisper.dll (net8.0-windows)..."
-& "C:\Program Files\dotnet\dotnet.exe" "$buildTmp\Driver.dll" "$va2Dir" "$net8CoreDir" "$net8DeskDir" "$srcDir" "$outDll" @extraRefs
-if ($LASTEXITCODE -ne 0) { throw "Compilation failed!" }
+# 2. Compile zero-dependency HCSWhisper.dll shim (goes into VoiceAttack 2\Apps\HCSWhisper\HCSWhisper.dll)
+$shimDll = Join-Path $distPluginDir "HCSWhisper.dll"
+Write-Host "Compiling zero-dependency HCSWhisper.dll VoiceAttack shim..."
+& "C:\Program Files\dotnet\dotnet.exe" "$buildTmp\Driver.dll" "$va2Dir" "$net8CoreDir" "$net8DeskDir" "HCSWhisper" "$loaderSrcDir" "$shimDll"
+if ($LASTEXITCODE -ne 0) { throw "HCSWhisper shim compilation failed!" }
+
 Remove-Item -Recurse -Force $buildTmp
 
-# Pack native & third-party runtime DLLs into engine.pak so VoiceAttack's recursive *.dll scanner
-# in Apps\ only ever sees HCSWhisper.dll (preventing out-of-order LoadLibrary on native ggml DLLs!)
+# 3. Pack HCSWhisper.Core.dll + Whisper.net + Vulkan/CPU runtimes into engine.pak
 Copy-Item -Force "$pkgDir\whisper.net\lib\net8.0\Whisper.net.dll" "$engineStageDir\"
 Copy-Item -Force "$pkgDir\microsoft.extensions.ai.abstractions\lib\net8.0\Microsoft.Extensions.AI.Abstractions.dll" "$engineStageDir\"
 

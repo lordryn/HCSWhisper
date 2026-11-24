@@ -1,133 +1,13 @@
 using System;
 using System.Drawing;
 using System.IO;
-using System.IO.Compression;
-using System.Reflection;
-using System.Runtime.Loader;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace HCSWhisper
 {
-    /// <summary>
-    /// VoiceAttack 2 Plugin Entry Point.
-    /// Keeps native C++ GGML/Vulkan DLLs packed inside engine.pak and extracts them to
-    /// %LOCALAPPDATA%\HCSWhisper\engine so VoiceAttack's recursive Apps\*.dll scanner
-    /// never calls LoadLibrary on unmanaged C++ runtime DLLs out of order.
-    /// </summary>
-    public class HcsWhisperPlugin
-    {
-        private const string EngineBundleVersion = "1.0.1";
-        private static readonly string PluginDir;
-        private static readonly string EngineDir;
-
-        static HcsWhisperPlugin()
-        {
-            PluginDir = Path.GetDirectoryName(typeof(HcsWhisperPlugin).Assembly.Location)
-                        ?? Path.Combine(AppContext.BaseDirectory, "Apps", "HCSWhisper");
-            EngineDir = EnsureEngineExtracted(PluginDir);
-
-            var alc = AssemblyLoadContext.GetLoadContext(typeof(HcsWhisperPlugin).Assembly);
-            if (alc != null)
-            {
-                alc.Resolving += (_, name) => TryLoadDependency(name);
-            }
-            AppDomain.CurrentDomain.AssemblyResolve += (_, args) => TryLoadDependency(new AssemblyName(args.Name));
-        }
-
-        private static string EnsureEngineExtracted(string pluginDir)
-        {
-            string engineDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "HCSWhisper", "engine");
-            Directory.CreateDirectory(engineDir);
-
-            string pakPath = Path.Combine(pluginDir, "engine.pak");
-            string stampPath = Path.Combine(engineDir, ".bundle-version");
-
-            try
-            {
-                if (File.Exists(pakPath))
-                {
-                    string pakStamp = $"{EngineBundleVersion}:{new FileInfo(pakPath).Length}";
-                    bool upToDate = File.Exists(stampPath) &&
-                                    string.Equals(File.ReadAllText(stampPath).Trim(), pakStamp, StringComparison.Ordinal) &&
-                                    File.Exists(Path.Combine(engineDir, "Whisper.net.dll"));
-
-                    if (!upToDate)
-                    {
-                        if (Directory.Exists(engineDir))
-                        {
-                            try { Directory.Delete(engineDir, recursive: true); } catch { }
-                            Directory.CreateDirectory(engineDir);
-                        }
-                        ZipFile.ExtractToDirectory(pakPath, engineDir, overwriteFiles: true);
-                        File.WriteAllText(stampPath, pakStamp);
-                    }
-                }
-            }
-            catch
-            {
-                // If already extracted and locked by another instance, continue using existing EngineDir
-            }
-
-            return engineDir;
-        }
-
-        private static Assembly TryLoadDependency(AssemblyName name)
-        {
-            if (string.IsNullOrEmpty(name?.Name))
-                return null;
-
-            foreach (string folder in new[] { EngineDir, PluginDir })
-            {
-                string candidate = Path.Combine(folder, name.Name + ".dll");
-                if (File.Exists(candidate))
-                {
-                    var alc = AssemblyLoadContext.GetLoadContext(typeof(HcsWhisperPlugin).Assembly);
-                    return alc != null ? alc.LoadFromAssemblyPath(candidate) : Assembly.LoadFrom(candidate);
-                }
-            }
-
-            string vaRootCandidate = Path.Combine(AppContext.BaseDirectory, name.Name + ".dll");
-            if (File.Exists(vaRootCandidate))
-            {
-                return AssemblyLoadContext.Default.LoadFromAssemblyPath(vaRootCandidate);
-            }
-
-            return null;
-        }
-
-        public static string VA_DisplayName() => "HCSWhisper AI Speech Engine";
-
-        public static string VA_DisplayInfo() =>
-            "HCSWhisper v1.0.1 — GPU-accelerated Whisper speech engine built for HCS Voice Packs (Star Citizen, Elite Dangerous & more).";
-
-        public static Guid VA_Id() => new("{8E47C9A1-5F2B-4D8E-9A31-7C64E0B51F29}");
-
-        public static void VA_StopCommand()
-        {
-            // No-op
-        }
-
-        public static void VA_Init1(dynamic vaProxy)
-        {
-            HcsWhisperRuntime.Initialize(vaProxy, PluginDir, EngineDir);
-        }
-
-        public static void VA_Invoke1(dynamic vaProxy)
-        {
-            HcsWhisperRuntime.Invoke(vaProxy);
-        }
-
-        public static void VA_Exit1(dynamic vaProxy)
-        {
-            HcsWhisperRuntime.Shutdown();
-        }
-    }
-
-    internal static class HcsWhisperRuntime
+    public static class HcsWhisperRuntime
     {
         private static dynamic _proxy;
         private static string _pluginDir;
@@ -144,6 +24,11 @@ namespace HCSWhisper
 
         private static Guid? _lastProfileId;
         private static CancellationTokenSource _shutdownCts;
+
+        public static void StopCommand()
+        {
+            // Optional hook if VA stops all active commands
+        }
 
         public static void Initialize(dynamic vaProxy, string pluginDir, string engineDir)
         {
@@ -186,7 +71,7 @@ namespace HCSWhisper
                     string modeDesc = string.Equals(_config.Mode, "OpenMic", StringComparison.OrdinalIgnoreCase)
                         ? "Open-Mic VAD"
                         : $"Push-to-Talk [{InputPoller.FormatFriendly(_config.PttBinding)}]";
-                    LogToVaAndUi($"HCSWhisper active — Mode: {modeDesc} | Double-click tray icon to configure.", "green");
+                    LogToVaAndUi($"HCSWhisper active — Mode: {modeDesc} | Double-click cyan mic tray icon to configure.", "green");
 
                     await MonitorProfileChangesAsync(_shutdownCts.Token).ConfigureAwait(false);
                 }
@@ -290,7 +175,7 @@ namespace HCSWhisper
                     if (currentId != _lastProfileId)
                     {
                         _lastProfileId = currentId;
-                        await Task.Delay(1200, ct).ConfigureAwait(false); // Let HCS profile startup finish
+                        await Task.Delay(1200, ct).ConfigureAwait(false);
                         ReloadHcsIndex();
                     }
                 }
@@ -386,7 +271,6 @@ namespace HCSWhisper
                     onModelChanged: () => _ = Task.Run(() => _whisper.LoadOrSwitchModelAsync(_config.ModelName, _triggerIndex.WhisperPrompt, _shutdownCts.Token)),
                     onReloadTriggers: ReloadHcsIndex);
 
-                // Force handle creation so BeginInvoke works even while hidden
                 IntPtr unusedHandle = _form.Handle;
 
                 var menu = new ContextMenuStrip();

@@ -1,0 +1,9 @@
+packages/
+dist/
+bin/
+obj/
+obj_roslyn/
+tmp_*/
+.vs/
+*.nupkg
+*.user

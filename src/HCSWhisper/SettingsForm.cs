@@ -63,6 +63,7 @@ namespace HCSWhisper
         private TextBox _txtNickSpoken;
         private ComboBox _cbNickTarget;
         private Label _lblNickCount;
+        private readonly List<string> _recentLogLines = new(32);
 
         private static readonly Color BgDark = Color.FromArgb(20, 24, 33);
         private static readonly Color CardBg = Color.FromArgb(29, 35, 48);
@@ -176,12 +177,22 @@ namespace HCSWhisper
             statusCard.Controls.Add(topBtnFlow);
             outer.Controls.Add(statusCard, 0, 0);
 
-            // 2. Clean Dark Segmented Tab Bar
-            var navBar = new FlowLayoutPanel
+            // 2. Clean Dark Segmented Tab Bar + Report Issue Action
+            var navRow = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
-                Margin = new Padding(0, 0, 0, 10),
+                ColumnCount = 2,
+                Margin = new Padding(0, 0, 0, 10)
+            };
+            navRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            navRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            var navBar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight
             };
             _tabBtnGeneral = CreateFlatButton("General && Live Feed", 185);
@@ -191,7 +202,16 @@ namespace HCSWhisper
             _tabBtnNicknames.Click += (_, _) => SwitchPage(showGeneral: false);
             navBar.Controls.Add(_tabBtnGeneral);
             navBar.Controls.Add(_tabBtnNicknames);
-            outer.Controls.Add(navBar, 0, 1);
+
+            var btnReportIssue = CreateFlatButton("Report Issue / Homophone", 190);
+            btnReportIssue.Anchor = AnchorStyles.Right;
+            btnReportIssue.Margin = new Padding(8, 3, 0, 3);
+            btnReportIssue.ForeColor = AccentCyan;
+            btnReportIssue.Click += (_, _) => OpenIssueReportDialog();
+
+            navRow.Controls.Add(navBar, 0, 0);
+            navRow.Controls.Add(btnReportIssue, 1, 0);
+            outer.Controls.Add(navRow, 0, 1);
 
             // 3. Content Host Panel
             var contentHost = new Panel { Dock = DockStyle.Fill };
@@ -698,6 +718,11 @@ namespace HCSWhisper
             if (IsDisposed) return;
             if (InvokeRequired) { BeginInvoke(new Action(() => AppendLogLine(message, color))); return; }
 
+            string stamped = $"[{DateTime.Now:HH:mm:ss}] {message}";
+            _recentLogLines.Add(stamped);
+            if (_recentLogLines.Count > 25)
+                _recentLogLines.RemoveAt(0);
+
             _rtbLog.SelectionStart = _rtbLog.TextLength;
             _rtbLog.SelectionLength = 0;
             _rtbLog.SelectionColor = Color.FromArgb(100, 116, 139);
@@ -705,6 +730,24 @@ namespace HCSWhisper
             _rtbLog.SelectionColor = color;
             _rtbLog.AppendText(message + Environment.NewLine);
             _rtbLog.ScrollToCaret();
+        }
+
+        public void OpenIssueReportDialog()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke(new Action(OpenIssueReportDialog)); return; }
+
+            if (!Visible)
+            {
+                Show();
+                WindowState = FormWindowState.Normal;
+            }
+            Activate();
+            IssueReporter.ShowDialogOnUiThread(
+                this,
+                _config,
+                _getStatusSummary?.Invoke() ?? "",
+                _recentLogLines.ToList());
         }
 
         private async Task BindInputInteractiveAsync(bool isPtt)

@@ -423,6 +423,7 @@ namespace HCSWhisper
 
                 var menu = new ContextMenuStrip();
                 menu.Items.Add($"Open HCSWhisper v{HcsVersion.Current}...", null, (_, _) => ShowSettingsWindow());
+                menu.Items.Add("Report Issue / Suggest Homophone...", null, (_, _) => _form?.OpenIssueReportDialog());
                 menu.Items.Add("Check for Updates...", null, (_, _) => _ = CheckForUpdatesBackgroundAsync(manual: true));
                 menu.Items.Add("Reload HCS Voice Triggers", null, (_, _) => ReloadHcsIndex());
                 var pauseItem = new ToolStripMenuItem("Pause Listening") { Checked = _config.Paused, CheckOnClick = true };

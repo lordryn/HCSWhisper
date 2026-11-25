@@ -1,0 +1,26 @@
+name: Voice Mishearing / Missing Place or Homophone
+description: Report a Star Citizen / Elite Dangerous location or voice command that Whisper misheard
+title: "[Voice Match] "
+labels: ["enhancement"]
+body:
+  - type: input
+    id: heard
+    attributes:
+      label: What Whisper Heard
+      description: Paste the exact "Heard ..." text from the HCSWhisper feed
+      placeholder: e.g. Plot a course to Charles Beach.
+    validations:
+      required: true
+  - type: input
+    id: expected
+    attributes:
+      label: Expected Location or HCS Command
+      description: Which Star Citizen / Elite Dangerous destination or command did you say?
+      placeholder: e.g. Chawla's Beach
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics / Recent Feed (Optional)
+      description: Paste output from HCSWhisper's "Report Issue" dialog if available

@@ -24,6 +24,7 @@ Windows Speech Recognition (SAPI) has been the weakest link in VoiceAttack for o
   * You say: `"disembark the ship"` → Fires HCS: `"dismebark the ship"` *(even works around typos in upstream trigger files!)*
   * **Safety Gate:** Destructive commands (`eject`, `self destruct`, `abandon`, `jettison`) require a strict `95%+` match so stray chatter never ejects you into space.
 * **Customizable Nicknames & Command Aliases:** Open the **Place Nicknames & Aliases** tab in the HCSWhisper tray window to view, search, add, edit, or import/export custom place nicknames (`"home base"` → `"Port Tressler"`) and full command aliases (`"punch it"` → `"engage quantum jump"`).
+* **1-Click Issue & Homophone Reporter:** Click **Report Issue / Homophone** inside HCSWhisper to auto-capture the latest misheard Whisper transcript + sanitized diagnostics and open a **pre-filled GitHub Issue** (or copy a formatted block for Discord) with zero API keys or setup.
 * **Built-In Auto-Update Prompt:** Checks GitHub Releases automatically on startup (configurable) and offers a 1-click **Update & Restart VoiceAttack** prompt whenever a new build ships.
 
 ---

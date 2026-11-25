@@ -45,6 +45,8 @@ namespace HCSWhisper
 
             // Stanton LEO Orbital Stations
             ["tressler"] = "Port Tressler",
+            ["trellis"] = "Port Tressler",
+            ["trestle"] = "Port Tressler",
             ["pt"] = "Port Tressler",
             ["everus"] = "Everus Harbor",
             ["eh"] = "Everus Harbor",

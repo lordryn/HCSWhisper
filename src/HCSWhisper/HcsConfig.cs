@@ -17,6 +17,8 @@ namespace HCSWhisper
         public bool AutoMuteVaSpeech { get; set; } = true;
         public bool PlayPttBeep { get; set; } = false;
         public bool Paused { get; set; } = false;
+        public bool CheckUpdatesOnStartup { get; set; } = true;
+        public string SkippedUpdateVersion { get; set; } = "";
 
         public static string DataDir
         {

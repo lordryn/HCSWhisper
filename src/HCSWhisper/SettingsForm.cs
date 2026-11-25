@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,9 +11,10 @@ using System.Windows.Forms;
 namespace HCSWhisper
 {
     /// <summary>
-    /// Dark-themed HCSWhisper Control Panel & System Tray Icon.
-    /// Allows 1-click HOTAS/Mouse/Keyboard Push-to-Talk binding, Open-Mic VAD tuning,
-    /// model selection, and live millisecond transcription monitoring.
+    /// Dark-themed HCSWhisper Control Panel & System Tray Icon (v1.1.0).
+    /// Tab 1: General, HOTAS/Key PTT & Open-Mic VAD, Whisper Model, Live Recognition Feed.
+    /// Tab 2: Customizable Place Nicknames ("ash" -> "Ashland", "babbage" -> "New Babbage") & Command Aliases.
+    /// Includes 1-click GitHub Update Checker.
     /// </summary>
     public sealed class SettingsForm : Form
     {
@@ -19,11 +22,21 @@ namespace HCSWhisper
         private static extern bool DestroyIcon(IntPtr handle);
 
         private readonly HcsConfig _config;
+        private readonly NicknameStore _nicknames;
         private readonly AudioCaptureEngine _audio;
         private readonly Func<string> _getStatusSummary;
+        private readonly Func<IReadOnlyList<string>> _getKnownDestinations;
         private readonly Action _onModelChanged;
         private readonly Action _onReloadTriggers;
+        private readonly Action _onManualUpdateCheck;
 
+        // Tab switcher buttons & panels
+        private Button _tabBtnGeneral;
+        private Button _tabBtnNicknames;
+        private Panel _pageGeneral;
+        private Panel _pageNicknames;
+
+        // General tab controls
         private RadioButton _rbPtt;
         private RadioButton _rbOpenMic;
         private Button _btnBindPtt;
@@ -35,12 +48,21 @@ namespace HCSWhisper
         private Label _lblVadVal;
         private CheckBox _chkBeep;
         private CheckBox _chkAutoMuteVa;
+        private CheckBox _chkAutoUpdate;
         private Label _lblStatus;
         private Panel _meterFill;
         private Panel _meterBg;
         private RichTextBox _rtbLog;
         private System.Windows.Forms.Timer _uiTimer;
         private CancellationTokenSource _bindCts;
+
+        // Nicknames tab controls
+        private TextBox _txtFilterNicks;
+        private ListView _lvNicknames;
+        private ComboBox _cbNickKind;
+        private TextBox _txtNickSpoken;
+        private ComboBox _cbNickTarget;
+        private Label _lblNickCount;
 
         private static readonly Color BgDark = Color.FromArgb(20, 24, 33);
         private static readonly Color CardBg = Color.FromArgb(29, 35, 48);
@@ -51,16 +73,22 @@ namespace HCSWhisper
 
         public SettingsForm(
             HcsConfig config,
+            NicknameStore nicknames,
             AudioCaptureEngine audio,
             Func<string> getStatusSummary,
+            Func<IReadOnlyList<string>> getKnownDestinations,
             Action onModelChanged,
-            Action onReloadTriggers)
+            Action onReloadTriggers,
+            Action onManualUpdateCheck)
         {
             _config = config;
+            _nicknames = nicknames;
             _audio = audio;
             _getStatusSummary = getStatusSummary;
+            _getKnownDestinations = getKnownDestinations;
             _onModelChanged = onModelChanged;
             _onReloadTriggers = onReloadTriggers;
+            _onManualUpdateCheck = onManualUpdateCheck;
 
             BuildUi();
         }
@@ -71,21 +99,17 @@ namespace HCSWhisper
             using (var g = Graphics.FromImage(bmp))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                var bgBrush = new SolidBrush(recording ? Color.FromArgb(220, 38, 38) : Color.FromArgb(15, 23, 42));
-                var ringPen = new Pen(recording ? Color.FromArgb(252, 165, 165) : Color.FromArgb(56, 189, 248), 2.2f);
+                using var bgBrush = new SolidBrush(recording ? Color.FromArgb(220, 38, 38) : Color.FromArgb(15, 23, 42));
+                using var ringPen = new Pen(recording ? Color.FromArgb(252, 165, 165) : Color.FromArgb(56, 189, 248), 2.2f);
                 g.FillEllipse(bgBrush, 1, 1, 29, 29);
                 g.DrawEllipse(ringPen, 2, 2, 27, 27);
 
-                // Microphone capsule
                 using var fg = new SolidBrush(Color.White);
                 g.FillRoundedRectangleFallback(fg, 12, 7, 8, 12, 4);
                 using var arcPen = new Pen(Color.White, 2f);
                 g.DrawArc(arcPen, 9, 10, 14, 12, 0, 180);
                 g.DrawLine(arcPen, 16, 22, 16, 26);
                 g.DrawLine(arcPen, 12, 26, 20, 26);
-
-                bgBrush.Dispose();
-                ringPen.Dispose();
             }
 
             IntPtr hIcon = bmp.GetHicon();
@@ -96,51 +120,125 @@ namespace HCSWhisper
 
         private void BuildUi()
         {
-            Text = "HCSWhisper — AI Speech Engine for VoiceAttack & HCS Voice Packs";
-            Size = new Size(680, 620);
-            MinimumSize = new Size(640, 560);
+            Text = $"HCSWhisper v{HcsVersion.Current} — AI Speech Engine for VoiceAttack & HCS Voice Packs";
+            Size = new Size(740, 680);
+            MinimumSize = new Size(690, 610);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = BgDark;
             ForeColor = TextPrimary;
             Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
             Icon = CreateDynamicAppIcon(false);
 
-            var root = new TableLayoutPanel
+            var outer = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                Padding = new Padding(16),
+                Padding = new Padding(14),
                 ColumnCount = 1,
-                RowCount = 4
+                RowCount = 3
             };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-            // 1. Header Status Card
-            var statusCard = CreateCard(new Padding(12, 10, 12, 10));
+            // 1. Top Status & Actions Bar
+            var statusCard = CreateCard(new Padding(12, 9, 12, 9));
+            statusCard.Height = 46;
             _lblStatus = new Label
             {
                 Dock = DockStyle.Fill,
-                AutoSize = true,
+                AutoEllipsis = true,
+                TextAlign = ContentAlignment.MiddleLeft,
                 ForeColor = AccentCyan,
-                Font = new Font("Segoe UI Semibold", 9.5f),
+                Font = new Font("Segoe UI Semibold", 9.25f),
+                UseMnemonic = false,
                 Text = _getStatusSummary?.Invoke() ?? "Initializing HCSWhisper..."
             };
-            var btnReload = CreateFlatButton("Reload HCS Pack", 130);
-            btnReload.Dock = DockStyle.Right;
+            var topBtnFlow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Right,
+                AutoSize = true,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight
+            };
+            var btnCheckUpdate = CreateFlatButton("Check Updates", 118);
+            btnCheckUpdate.Click += (_, _) => _onManualUpdateCheck?.Invoke();
+            var btnReload = CreateFlatButton("Reload HCS Pack", 125);
+            btnReload.Margin = new Padding(8, 3, 0, 3);
             btnReload.Click += (_, _) =>
             {
                 _onReloadTriggers?.Invoke();
                 RefreshStatusLabel();
+                RefreshDestinationsAutocomplete();
             };
+            topBtnFlow.Controls.Add(btnCheckUpdate);
+            topBtnFlow.Controls.Add(btnReload);
             statusCard.Controls.Add(_lblStatus);
-            statusCard.Controls.Add(btnReload);
-            statusCard.Height = 46;
-            root.Controls.Add(statusCard, 0, 0);
+            statusCard.Controls.Add(topBtnFlow);
+            outer.Controls.Add(statusCard, 0, 0);
 
-            // 2. Activation & Bindings Card
-            var bindCard = CreateCard(new Padding(14, 12, 14, 12));
+            // 2. Clean Dark Segmented Tab Bar
+            var navBar = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 10),
+                FlowDirection = FlowDirection.LeftToRight
+            };
+            _tabBtnGeneral = CreateFlatButton("General && Live Feed", 185);
+            _tabBtnNicknames = CreateFlatButton("Place Nicknames && Aliases", 215);
+            _tabBtnNicknames.Margin = new Padding(8, 3, 3, 3);
+            _tabBtnGeneral.Click += (_, _) => SwitchPage(showGeneral: true);
+            _tabBtnNicknames.Click += (_, _) => SwitchPage(showGeneral: false);
+            navBar.Controls.Add(_tabBtnGeneral);
+            navBar.Controls.Add(_tabBtnNicknames);
+            outer.Controls.Add(navBar, 0, 1);
+
+            // 3. Content Host Panel
+            var contentHost = new Panel { Dock = DockStyle.Fill };
+            _pageGeneral = BuildGeneralPage();
+            _pageNicknames = BuildNicknamesPage();
+            contentHost.Controls.Add(_pageGeneral);
+            contentHost.Controls.Add(_pageNicknames);
+            outer.Controls.Add(contentHost, 0, 2);
+
+            Controls.Add(outer);
+            SwitchPage(showGeneral: true);
+            UpdateModeVisibility();
+
+            _uiTimer = new System.Windows.Forms.Timer { Interval = 50 };
+            _uiTimer.Tick += (_, _) =>
+            {
+                if (!Visible || !_pageGeneral.Visible || _audio == null) return;
+                float level = Math.Clamp(_audio.CurrentRms * 8f, 0f, 1f);
+                _meterFill.Width = (int)(_meterBg.Width * level);
+                _meterFill.BackColor = _audio.IsRecording ? AccentCyan : AccentGreen;
+            };
+            _uiTimer.Start();
+
+            FormClosing += (_, e) =>
+            {
+                if (e.CloseReason == CloseReason.UserClosing)
+                {
+                    e.Cancel = true;
+                    Hide();
+                }
+            };
+        }
+
+        private Panel BuildGeneralPage()
+        {
+            var page = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3
+            };
+            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            // Activation & Bindings Card
+            var bindCard = CreateCard(new Padding(14, 10, 14, 10));
             var bindLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, AutoSize = true };
             bindLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
             bindLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -180,9 +278,9 @@ namespace HCSWhisper
             bindLayout.Controls.Add(_btnBindSuppress, 1, 2);
             bindLayout.Controls.Add(_btnClearSuppress, 2, 2);
 
-            var vadFlow = new Panel { Height = 32, Dock = DockStyle.Fill };
-            _tbVad = new TrackBar { Minimum = 4, Maximum = 80, Value = Math.Clamp((int)(_config.VadRmsThreshold * 1000), 4, 80), TickStyle = TickStyle.None, Width = 260, Height = 28, Left = 0, Top = 2 };
-            _lblVadVal = new Label { AutoSize = true, Left = 270, Top = 6, ForeColor = TextMuted, Text = $"{_tbVad.Value / 10.0:F1}% threshold" };
+            var vadFlow = new Panel { Height = 30, Dock = DockStyle.Fill };
+            _tbVad = new TrackBar { Minimum = 4, Maximum = 80, Value = Math.Clamp((int)(_config.VadRmsThreshold * 1000), 4, 80), TickStyle = TickStyle.None, Width = 260, Height = 26, Left = 0, Top = 2 };
+            _lblVadVal = new Label { AutoSize = true, Left = 270, Top = 5, ForeColor = TextMuted, Text = $"{_tbVad.Value / 10.0:F1}% threshold" };
             _tbVad.Scroll += (_, _) =>
             {
                 _config.VadRmsThreshold = _tbVad.Value / 1000f;
@@ -197,10 +295,10 @@ namespace HCSWhisper
 
             bindCard.Controls.Add(bindLayout);
             bindCard.AutoSize = true;
-            root.Controls.Add(bindCard, 0, 1);
+            page.Controls.Add(bindCard, 0, 0);
 
-            // 3. Audio & AI Model Card
-            var modelCard = CreateCard(new Padding(14, 12, 14, 12));
+            // Audio & AI Model Card
+            var modelCard = CreateCard(new Padding(14, 10, 14, 10));
             var modelLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
             modelLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
             modelLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -265,20 +363,23 @@ namespace HCSWhisper
             modelLayout.Controls.Add(_cbModel, 1, 2);
 
             var optsFlow = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true };
-            _chkBeep = new CheckBox { Text = "PTT audio cue beep", Checked = _config.PlayPttBeep, AutoSize = true, ForeColor = TextMuted };
+            _chkBeep = new CheckBox { Text = "PTT cue beep", Checked = _config.PlayPttBeep, AutoSize = true, ForeColor = TextMuted };
             _chkBeep.CheckedChanged += (_, _) => { _config.PlayPttBeep = _chkBeep.Checked; _config.Save(); };
-            _chkAutoMuteVa = new CheckBox { Text = "Auto-disable Windows Speech in VoiceAttack", Checked = _config.AutoMuteVaSpeech, AutoSize = true, ForeColor = TextMuted, Margin = new Padding(18, 3, 0, 0) };
+            _chkAutoMuteVa = new CheckBox { Text = "Auto-mute VA Windows Speech", Checked = _config.AutoMuteVaSpeech, AutoSize = true, ForeColor = TextMuted, Margin = new Padding(14, 3, 0, 0) };
             _chkAutoMuteVa.CheckedChanged += (_, _) => { _config.AutoMuteVaSpeech = _chkAutoMuteVa.Checked; _config.Save(); };
+            _chkAutoUpdate = new CheckBox { Text = "Prompt on updates", Checked = _config.CheckUpdatesOnStartup, AutoSize = true, ForeColor = TextMuted, Margin = new Padding(14, 3, 0, 0) };
+            _chkAutoUpdate.CheckedChanged += (_, _) => { _config.CheckUpdatesOnStartup = _chkAutoUpdate.Checked; _config.Save(); };
             optsFlow.Controls.Add(_chkBeep);
             optsFlow.Controls.Add(_chkAutoMuteVa);
+            optsFlow.Controls.Add(_chkAutoUpdate);
             modelLayout.Controls.Add(CreateMutedLabel("Options:"), 0, 3);
             modelLayout.Controls.Add(optsFlow, 1, 3);
 
             modelCard.Controls.Add(modelLayout);
             modelCard.AutoSize = true;
-            root.Controls.Add(modelCard, 0, 2);
+            page.Controls.Add(modelCard, 0, 1);
 
-            // 4. Live Recognition Feed
+            // Live Recognition Feed
             var logCard = CreateCard(new Padding(10));
             logCard.Dock = DockStyle.Fill;
             var lblLogHeader = new Label { Text = "Live Recognition & HCS Command Feed", UseMnemonic = false, Dock = DockStyle.Top, Height = 22, ForeColor = TextMuted, Font = new Font("Segoe UI Semibold", 9f) };
@@ -293,29 +394,296 @@ namespace HCSWhisper
             };
             logCard.Controls.Add(_rtbLog);
             logCard.Controls.Add(lblLogHeader);
-            root.Controls.Add(logCard, 0, 3);
+            page.Controls.Add(logCard, 0, 2);
 
-            Controls.Add(root);
-            UpdateModeVisibility();
+            return page;
+        }
 
-            _uiTimer = new System.Windows.Forms.Timer { Interval = 50 };
-            _uiTimer.Tick += (_, _) =>
+        private Panel BuildNicknamesPage()
+        {
+            var page = new TableLayoutPanel
             {
-                if (!Visible || _audio == null) return;
-                float level = Math.Clamp(_audio.CurrentRms * 8f, 0f, 1f);
-                _meterFill.Width = (int)(_meterBg.Width * level);
-                _meterFill.BackColor = _audio.IsRecording ? AccentCyan : AccentGreen;
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3
             };
-            _uiTimer.Start();
+            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            FormClosing += (_, e) =>
+            // 1. Search / Filter Header Card
+            var searchCard = CreateCard(new Padding(12, 8, 12, 8));
+            searchCard.AutoSize = true;
+            var searchRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, AutoSize = true };
+            searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            searchRow.Controls.Add(CreateMutedLabel("Filter Nicknames:"), 0, 0);
+            _txtFilterNicks = new TextBox
             {
-                if (e.CloseReason == CloseReason.UserClosing)
-                {
-                    e.Cancel = true;
-                    Hide();
-                }
+                Dock = DockStyle.Fill,
+                BackColor = BgDark,
+                ForeColor = TextPrimary,
+                BorderStyle = BorderStyle.FixedSingle,
+                PlaceholderText = "Type e.g. ash, babbage, l5, grim, kareah..."
             };
+            _txtFilterNicks.TextChanged += (_, _) => PopulateNicknamesList();
+            searchRow.Controls.Add(_txtFilterNicks, 1, 0);
+
+            _lblNickCount = new Label { AutoSize = true, ForeColor = AccentCyan, Anchor = AnchorStyles.Right, Padding = new Padding(8, 4, 0, 4) };
+            searchRow.Controls.Add(_lblNickCount, 2, 0);
+            searchCard.Controls.Add(searchRow);
+            page.Controls.Add(searchCard, 0, 0);
+
+            // 2. Nicknames List Card
+            var listCard = CreateCard(new Padding(10));
+            listCard.Dock = DockStyle.Fill;
+            _lvNicknames = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = false,
+                MultiSelect = false,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.FromArgb(14, 17, 24),
+                ForeColor = TextPrimary,
+                Font = new Font("Segoe UI", 9.25f)
+            };
+            _lvNicknames.Columns.Add("Type", 125);
+            _lvNicknames.Columns.Add("When I Say (Nickname)", 215);
+            _lvNicknames.Columns.Add("Maps To (HCS Place / Command)", 315);
+            _lvNicknames.SelectedIndexChanged += (_, _) =>
+            {
+                if (_lvNicknames.SelectedItems.Count == 0) return;
+                var item = _lvNicknames.SelectedItems[0];
+                _cbNickKind.SelectedIndex = item.Text == "Command Alias" ? 1 : 0;
+                _txtNickSpoken.Text = item.SubItems[1].Text;
+                _cbNickTarget.Text = item.SubItems[2].Text;
+            };
+            listCard.Controls.Add(_lvNicknames);
+            page.Controls.Add(listCard, 0, 1);
+
+            // 3. Add / Edit / Import / Export Editor Card
+            var editCard = CreateCard(new Padding(12, 10, 12, 10));
+            editCard.AutoSize = true;
+            var editGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, AutoSize = true };
+            editGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 165));
+            editGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 185));
+            editGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            editGrid.Controls.Add(CreateMutedLabel("Type"), 0, 0);
+            editGrid.Controls.Add(CreateMutedLabel("Nickname (What You Say)"), 1, 0);
+            editGrid.Controls.Add(CreateMutedLabel("Target HCS Destination or Command"), 2, 0);
+
+            _cbNickKind = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = BgDark, ForeColor = TextPrimary };
+            _cbNickKind.Items.AddRange(new object[] { "Place Nickname", "Command Alias" });
+            _cbNickKind.SelectedIndex = 0;
+
+            _txtNickSpoken = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                BackColor = BgDark,
+                ForeColor = TextPrimary,
+                BorderStyle = BorderStyle.FixedSingle,
+                PlaceholderText = "e.g. ash, babbage, home..."
+            };
+
+            _cbNickTarget = new ComboBox
+            {
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDown,
+                AutoCompleteMode = AutoCompleteMode.SuggestAppend,
+                AutoCompleteSource = AutoCompleteSource.ListItems,
+                BackColor = BgDark,
+                ForeColor = TextPrimary
+            };
+
+            editGrid.Controls.Add(_cbNickKind, 0, 1);
+            editGrid.Controls.Add(_txtNickSpoken, 1, 1);
+            editGrid.Controls.Add(_cbNickTarget, 2, 1);
+
+            var btnRow = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                Margin = new Padding(0, 8, 0, 0)
+            };
+
+            var btnAddSave = CreateFlatButton("Add / Update Nickname", 175);
+            btnAddSave.BackColor = Color.FromArgb(14, 116, 144);
+            btnAddSave.Click += (_, _) => SaveCurrentNicknameEntry();
+
+            var btnDelete = CreateFlatButton("Delete Selected", 130);
+            btnDelete.Margin = new Padding(8, 3, 3, 3);
+            btnDelete.Click += (_, _) => DeleteSelectedNicknameEntry();
+
+            var btnImport = CreateFlatButton("Import JSON...", 120);
+            btnImport.Margin = new Padding(22, 3, 3, 3);
+            btnImport.Click += (_, _) => ImportNicknamesJson();
+
+            var btnExport = CreateFlatButton("Export JSON...", 120);
+            btnExport.Margin = new Padding(8, 3, 3, 3);
+            btnExport.Click += (_, _) => ExportNicknamesJson();
+
+            btnRow.Controls.AddRange(new Control[] { btnAddSave, btnDelete, btnImport, btnExport });
+            editGrid.Controls.Add(btnRow, 0, 2);
+            editGrid.SetColumnSpan(btnRow, 3);
+
+            editCard.Controls.Add(editGrid);
+            page.Controls.Add(editCard, 0, 2);
+
+            PopulateNicknamesList();
+            return page;
+        }
+
+        private void SwitchPage(bool showGeneral)
+        {
+            _pageGeneral.Visible = showGeneral;
+            _pageNicknames.Visible = !showGeneral;
+
+            _tabBtnGeneral.BackColor = showGeneral ? Color.FromArgb(14, 116, 144) : Color.FromArgb(38, 47, 66);
+            _tabBtnNicknames.BackColor = !showGeneral ? Color.FromArgb(14, 116, 144) : Color.FromArgb(38, 47, 66);
+
+            if (!showGeneral)
+            {
+                RefreshDestinationsAutocomplete();
+                PopulateNicknamesList();
+            }
+        }
+
+        public void RefreshDestinationsAutocomplete()
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired) { BeginInvoke(new Action(RefreshDestinationsAutocomplete)); return; }
+
+            var places = _getKnownDestinations?.Invoke();
+            if (places == null || places.Count == 0) return;
+
+            string prevText = _cbNickTarget.Text;
+            _cbNickTarget.BeginUpdate();
+            _cbNickTarget.Items.Clear();
+            foreach (string p in places)
+                _cbNickTarget.Items.Add(p);
+            _cbNickTarget.EndUpdate();
+            _cbNickTarget.Text = prevText;
+        }
+
+        private void PopulateNicknamesList()
+        {
+            if (_lvNicknames == null || _nicknames == null) return;
+            string filter = (_txtFilterNicks?.Text ?? "").Trim();
+
+            _lvNicknames.BeginUpdate();
+            _lvNicknames.Items.Clear();
+
+            int count = 0;
+            foreach (var kvp in _nicknames.PlaceNicknames.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                if (filter.Length > 0 &&
+                    !kvp.Key.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
+                    !kvp.Value.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var item = new ListViewItem("Place Nickname");
+                item.SubItems.Add(kvp.Key);
+                item.SubItems.Add(kvp.Value);
+                _lvNicknames.Items.Add(item);
+                count++;
+            }
+
+            foreach (var kvp in _nicknames.CommandAliases.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                if (filter.Length > 0 &&
+                    !kvp.Key.Contains(filter, StringComparison.OrdinalIgnoreCase) &&
+                    !kvp.Value.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var item = new ListViewItem("Command Alias");
+                item.SubItems.Add(kvp.Key);
+                item.SubItems.Add(kvp.Value);
+                _lvNicknames.Items.Add(item);
+                count++;
+            }
+
+            _lvNicknames.EndUpdate();
+            if (_lblNickCount != null)
+                _lblNickCount.Text = $"{count} active";
+        }
+
+        private void SaveCurrentNicknameEntry()
+        {
+            string spoken = (_txtNickSpoken.Text ?? "").Trim();
+            string target = (_cbNickTarget.Text ?? "").Trim();
+            if (string.IsNullOrEmpty(spoken) || string.IsNullOrEmpty(target))
+                return;
+
+            if (_cbNickKind.SelectedIndex == 1)
+                _nicknames.SetCommandAlias(spoken, target);
+            else
+                _nicknames.SetPlaceNickname(spoken, target);
+
+            _nicknames.Save();
+            _txtNickSpoken.Clear();
+            PopulateNicknamesList();
+            _onReloadTriggers?.Invoke();
+            RefreshStatusLabel();
+        }
+
+        private void DeleteSelectedNicknameEntry()
+        {
+            if (_lvNicknames.SelectedItems.Count == 0) return;
+            var sel = _lvNicknames.SelectedItems[0];
+            string kind = sel.Text;
+            string spoken = sel.SubItems[1].Text;
+
+            if (kind == "Command Alias")
+                _nicknames.RemoveCommandAlias(spoken);
+            else
+                _nicknames.RemovePlaceNickname(spoken);
+
+            _nicknames.Save();
+            PopulateNicknamesList();
+            _onReloadTriggers?.Invoke();
+            RefreshStatusLabel();
+        }
+
+        private void ImportNicknamesJson()
+        {
+            using var ofd = new OpenFileDialog
+            {
+                Title = "Import HCSWhisper Nicknames JSON",
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
+            };
+            if (ofd.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var imported = NicknameStore.Load(ofd.FileName);
+            foreach (var kvp in imported.PlaceNicknames)
+                _nicknames.SetPlaceNickname(kvp.Key, kvp.Value);
+            foreach (var kvp in imported.CommandAliases)
+                _nicknames.SetCommandAlias(kvp.Key, kvp.Value);
+
+            _nicknames.Save();
+            PopulateNicknamesList();
+            _onReloadTriggers?.Invoke();
+            RefreshStatusLabel();
+        }
+
+        private void ExportNicknamesJson()
+        {
+            using var sfd = new SaveFileDialog
+            {
+                Title = "Export HCSWhisper Nicknames JSON",
+                FileName = "hcswhisper-nicknames.json",
+                Filter = "JSON Files (*.json)|*.json"
+            };
+            if (sfd.ShowDialog(this) == DialogResult.OK)
+            {
+                _nicknames.Save(sfd.FileName);
+            }
         }
 
         public void RefreshStatusLabel()
@@ -382,6 +750,7 @@ namespace HCSWhisper
         private static Label CreateMutedLabel(string text) => new()
         {
             Text = text,
+            UseMnemonic = false,
             ForeColor = TextMuted,
             AutoSize = true,
             Anchor = AnchorStyles.Left,

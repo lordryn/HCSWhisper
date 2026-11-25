@@ -12,6 +12,7 @@ namespace HCSWhisper
         private static dynamic _proxy;
         private static string _pluginDir;
         private static HcsConfig _config;
+        private static NicknameStore _nicknames;
         private static HcsTriggerIndex _triggerIndex;
         private static WhisperEngine _whisper;
         private static AudioCaptureEngine _audio;
@@ -27,7 +28,6 @@ namespace HCSWhisper
 
         public static void StopCommand()
         {
-            // Optional hook if VA stops all active commands
         }
 
         public static void Initialize(dynamic vaProxy, string pluginDir, string engineDir)
@@ -37,6 +37,7 @@ namespace HCSWhisper
             _shutdownCts = new CancellationTokenSource();
 
             _config = HcsConfig.Load();
+            _nicknames = NicknameStore.Load();
             _triggerIndex = new HcsTriggerIndex();
             _whisper = new WhisperEngine(engineDir, LogToVaAndUi);
             _audio = new AudioCaptureEngine(_config, IsCrewAudioPlaying, LogToVaAndUi);
@@ -60,7 +61,6 @@ namespace HCSWhisper
                         catch { }
                     }
 
-                    // Give HCS startup script ~1.5s to populate live hcsvt_* variables if VA just launched
                     await Task.Delay(1500, _shutdownCts.Token).ConfigureAwait(false);
                     ReloadHcsIndex();
 
@@ -71,7 +71,12 @@ namespace HCSWhisper
                     string modeDesc = string.Equals(_config.Mode, "OpenMic", StringComparison.OrdinalIgnoreCase)
                         ? "Open-Mic VAD"
                         : $"Push-to-Talk [{InputPoller.FormatFriendly(_config.PttBinding)}]";
-                    LogToVaAndUi($"HCSWhisper active — Mode: {modeDesc} | Double-click cyan mic tray icon to configure.", "green");
+                    LogToVaAndUi($"HCSWhisper v{HcsVersion.Current} active — Mode: {modeDesc} | Double-click cyan mic tray icon to configure.", "green");
+
+                    if (_config.CheckUpdatesOnStartup)
+                    {
+                        _ = CheckForUpdatesBackgroundAsync(manual: false);
+                    }
 
                     await MonitorProfileChangesAsync(_shutdownCts.Token).ConfigureAwait(false);
                 }
@@ -104,6 +109,10 @@ namespace HCSWhisper
             {
                 ReloadHcsIndex();
             }
+            else if (ctx.Equals("Check Updates", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = CheckForUpdatesBackgroundAsync(manual: true);
+            }
             else if (ctx.Equals("Toggle Pause", StringComparison.OrdinalIgnoreCase))
             {
                 _config.Paused = !_config.Paused;
@@ -126,6 +135,55 @@ namespace HCSWhisper
                     _form.BeginInvoke(new Action(() => Application.ExitThread()));
             }
             catch { }
+        }
+
+        private static async Task CheckForUpdatesBackgroundAsync(bool manual)
+        {
+            try
+            {
+                var info = await AutoUpdater.CheckLatestReleaseAsync(_shutdownCts.Token).ConfigureAwait(false);
+                if (info == null)
+                {
+                    if (manual)
+                    {
+                        LogToVaAndUi($"HCSWhisper is up to date (v{HcsVersion.Current}).", "green");
+                        if (_form != null && !_form.IsDisposed)
+                        {
+                            _form.BeginInvoke(new Action(() =>
+                                MessageBox.Show(_form, $"You are running the latest version of HCSWhisper (v{HcsVersion.Current}).",
+                                    "HCSWhisper Up to Date", MessageBoxButtons.OK, MessageBoxIcon.Information)));
+                        }
+                    }
+                    return;
+                }
+
+                if (!manual && string.Equals(_config.SkippedUpdateVersion, info.LatestVersion, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                LogToVaAndUi($"HCSWhisper update available: v{info.LatestVersion} (current: v{HcsVersion.Current})", "blue");
+                AutoUpdater.ShowUpdatePromptOnUiThread(
+                    _form,
+                    info,
+                    _config,
+                    _pluginDir,
+                    RequestVoiceAttackClose,
+                    LogToVaAndUi);
+            }
+            catch (Exception ex)
+            {
+                if (manual)
+                    LogToVaAndUi($"Update check failed: {ex.Message}", "orange");
+            }
+        }
+
+        private static void RequestVoiceAttackClose()
+        {
+            Task.Run(async () =>
+            {
+                try { _proxy?.Close(); } catch { }
+                await Task.Delay(2000).ConfigureAwait(false);
+                Environment.Exit(0);
+            });
         }
 
         private static void ReloadHcsIndex()
@@ -153,10 +211,12 @@ namespace HCSWhisper
                     {
                         try { return _proxy.Command.Exists(phrase); }
                         catch { return false; }
-                    });
+                    },
+                    _nicknames);
 
                 LogToVaAndUi($"HCSWhisper indexed: {_triggerIndex.ActivePackSummary}", "blue");
                 _form?.RefreshStatusLabel();
+                _form?.RefreshDestinationsAutocomplete();
             }
             catch (Exception ex)
             {
@@ -250,7 +310,7 @@ namespace HCSWhisper
         {
             string backend = _whisper?.ActiveBackend ?? "Loading";
             string pack = _triggerIndex?.ActivePackSummary ?? "Indexing...";
-            return $"GPU Backend: {backend}  |  {pack}";
+            return $"GPU: {backend}  |  {pack}";
         }
 
         private static void StartTrayAndSettingsThread()
@@ -266,15 +326,19 @@ namespace HCSWhisper
 
                 _form = new SettingsForm(
                     _config,
+                    _nicknames,
                     _audio,
                     GetStatusSummary,
+                    () => _triggerIndex.KnownDestinationNames,
                     onModelChanged: () => _ = Task.Run(() => _whisper.LoadOrSwitchModelAsync(_config.ModelName, _triggerIndex.WhisperPrompt, _shutdownCts.Token)),
-                    onReloadTriggers: ReloadHcsIndex);
+                    onReloadTriggers: ReloadHcsIndex,
+                    onManualUpdateCheck: () => _ = CheckForUpdatesBackgroundAsync(manual: true));
 
                 IntPtr unusedHandle = _form.Handle;
 
                 var menu = new ContextMenuStrip();
-                menu.Items.Add("Open HCSWhisper Settings...", null, (_, _) => ShowSettingsWindow());
+                menu.Items.Add($"Open HCSWhisper v{HcsVersion.Current}...", null, (_, _) => ShowSettingsWindow());
+                menu.Items.Add("Check for Updates...", null, (_, _) => _ = CheckForUpdatesBackgroundAsync(manual: true));
                 menu.Items.Add("Reload HCS Voice Triggers", null, (_, _) => ReloadHcsIndex());
                 var pauseItem = new ToolStripMenuItem("Pause Listening") { Checked = _config.Paused, CheckOnClick = true };
                 pauseItem.CheckedChanged += (_, _) =>
@@ -287,7 +351,7 @@ namespace HCSWhisper
                 _trayIcon = new NotifyIcon
                 {
                     Icon = _idleIcon,
-                    Text = "HCSWhisper — Double-click to configure",
+                    Text = $"HCSWhisper v{HcsVersion.Current} — Double-click to configure",
                     ContextMenuStrip = menu,
                     Visible = true
                 };
@@ -313,6 +377,7 @@ namespace HCSWhisper
             _form.BeginInvoke(new Action(() =>
             {
                 _form.RefreshStatusLabel();
+                _form.RefreshDestinationsAutocomplete();
                 _form.Show();
                 _form.WindowState = FormWindowState.Normal;
                 _form.Activate();

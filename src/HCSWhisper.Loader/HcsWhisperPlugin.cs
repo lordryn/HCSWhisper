@@ -14,7 +14,7 @@ namespace HCSWhisper
     /// </summary>
     public class HcsWhisperPlugin
     {
-        private const string BundleVersion = "1.0.4";
+        private const string BundleVersion = "1.1.0";
         private static readonly object InitLock = new object();
         private static Type _coreRuntimeType;
         private static MethodInfo _invokeMethod;
@@ -24,7 +24,7 @@ namespace HCSWhisper
         public static string VA_DisplayName() => "HCSWhisper AI Speech Engine";
 
         public static string VA_DisplayInfo() =>
-            "HCSWhisper v1.0.4 — GPU-accelerated Whisper speech engine for HCS Voice Packs (Star Citizen, Elite Dangerous & more).";
+            "HCSWhisper v1.1.0 — GPU-accelerated Whisper speech engine for HCS Voice Packs (Star Citizen, Elite Dangerous & more).";
 
         public static Guid VA_Id() => new Guid("{8E47C9A1-5F2B-4D8E-9A31-7C64E0B51F29}");
 

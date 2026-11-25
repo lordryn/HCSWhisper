@@ -7,8 +7,8 @@ namespace HCSWhisper
 {
     /// <summary>
     /// Stores built-in + user-customizable Place Nicknames (e.g. "ash" -> "Ashland", "babbage" -> "New Babbage",
-    /// "arc l5" -> "Yellow Core Station") and Full Command Aliases (e.g. "punch it" -> "engage quantum jump").
-    /// Persisted in %LOCALAPPDATA%\HCSWhisper\nicknames.json so user customizations survive plugin updates.
+    /// "arc l5" -> "Yellow Core Station", "charles beach" -> "Chawla's Beach") and Full Command Aliases
+    /// (e.g. "punch it" -> "engage quantum jump"). Persisted in %LOCALAPPDATA%\HCSWhisper\nicknames.json.
     /// </summary>
     public sealed class NicknameStore
     {
@@ -20,12 +20,13 @@ namespace HCSWhisper
 
         private static readonly Dictionary<string, string> BuiltInPlaceNicknames = new(StringComparer.OrdinalIgnoreCase)
         {
-            // Stanton Major Cities & Spaceports
+            // Stanton Major Cities & Spaceports (Note: bare "dunlow" intentionally omitted so "Downlow" & "Dunlow Ridge" stay distinct!)
             ["babbage"] = "New Babbage",
             ["nb"] = "New Babbage",
             ["nb int"] = "New Babbage",
             ["new babbage spaceport"] = "New Babbage",
             ["interstellar spaceport"] = "New Babbage",
+            ["tobin"] = "New Babbage",
             ["commons"] = "New Babbage",
             ["the commons"] = "New Babbage",
             ["a18"] = "Area18",
@@ -35,9 +36,9 @@ namespace HCSWhisper
             ["riker spaceport"] = "Area18",
             ["teasa"] = "Lorville",
             ["teasa spaceport"] = "Lorville",
-            ["dunlow"] = "Orison",
             ["august dunlow"] = "Orison",
             ["dunlow spaceport"] = "Orison",
+            ["horizon"] = "Orison",
             ["grim"] = "Grim HEX",
             ["gh"] = "Grim HEX",
             ["hex"] = "Grim HEX",
@@ -53,6 +54,12 @@ namespace HCSWhisper
             ["olisar"] = "Seraphim Station",
             ["port olisar"] = "Seraphim Station",
             ["po"] = "Seraphim Station",
+
+            // Stanton Moons — Whisper Homophones
+            ["cleo"] = "Clio",
+            ["yellow"] = "Yela",
+            ["aerial"] = "Arial",
+            ["ariel"] = "Arial",
 
             // Stanton Lagrange Stations — ArcCorp (ARC-L1..L5)
             ["arc l1"] = "Wide Forest Station",
@@ -121,10 +128,11 @@ namespace HCSWhisper
             ["microtech l5"] = "Modern Icarus Station",
             ["modern icarus"] = "Modern Icarus Station",
 
-            // Pyro & Nyx Stations, Planets & Popular Settlements
+            // Pyro & Nyx Stations, Planets, Moons & Popular Settlements + Whisper Homophones
             ["ash"] = "Ashland",
             ["ruin"] = "Ruin Station",
             ["orb"] = "Orbituary",
+            ["obituary"] = "Orbituary",
             ["patch"] = "Patch City",
             ["rats"] = "Rat's Nest",
             ["rats nest"] = "Rat's Nest",
@@ -157,10 +165,78 @@ namespace HCSWhisper
             ["golden riviera"] = "The Golden Riviera",
             ["shepherds"] = "Shepherd's Rest",
             ["shepherds rest"] = "Shepherd's Rest",
+            ["shepards rest"] = "Shepherd's Rest",
+            ["chawla"] = "Chawla's Beach",
             ["chawlas"] = "Chawla's Beach",
             ["chawlas beach"] = "Chawla's Beach",
+            ["charles beach"] = "Chawla's Beach",
+            ["carlas beach"] = "Chawla's Beach",
+            ["challenger beach"] = "Chawla's Beach",
+            ["sacren"] = "Sacren's Plot",
+            ["sacrens"] = "Sacren's Plot",
+            ["sacrens plot"] = "Sacren's Plot",
+            ["saccharin"] = "Sacren's Plot",
+            ["saccharins plot"] = "Sacren's Plot",
+            ["sacrans plot"] = "Sacren's Plot",
+            ["sacred plot"] = "Sacren's Plot",
+            ["saffrons plot"] = "Sacren's Plot",
+            ["seers"] = "Seer's Canyon",
+            ["seers canyon"] = "Seer's Canyon",
+            ["sears canyon"] = "Seer's Canyon",
+            ["ostlers"] = "Ostler's Claim",
+            ["ostlers claim"] = "Ostler's Claim",
+            ["hustlers claim"] = "Ostler's Claim",
+            ["oslers claim"] = "Ostler's Claim",
+            ["goners"] = "Goner's Deal",
+            ["goners deal"] = "Goner's Deal",
+            ["gunners deal"] = "Goner's Deal",
+            ["conners deal"] = "Goner's Deal",
+            ["gonners deal"] = "Goner's Deal",
+            ["scarpers"] = "Scarper's Turn",
+            ["scarpers turn"] = "Scarper's Turn",
+            ["scrapers turn"] = "Scarper's Turn",
+            ["dingers"] = "Dinger's Depot",
+            ["dingers depot"] = "Dinger's Depot",
+            ["fingers depot"] = "Dinger's Depot",
+            ["singers depot"] = "Dinger's Depot",
+            ["narenas"] = "Narena's Rest",
+            ["narenas rest"] = "Narena's Rest",
+            ["marinas rest"] = "Narena's Rest",
+            ["kabirs"] = "Kabir's Post",
+            ["kabirs post"] = "Kabir's Post",
+            ["cabirs post"] = "Kabir's Post",
             ["prophets"] = "Prophet's Peak",
             ["prophets peak"] = "Prophet's Peak",
+            ["profits peak"] = "Prophet's Peak",
+            ["canard"] = "Canard View",
+            ["cannard view"] = "Canard View",
+            ["conrad view"] = "Canard View",
+            ["feo"] = "Feo Canyon Depot",
+            ["feo canyon"] = "Feo Canyon Depot",
+            ["theo canyon"] = "Feo Canyon Depot",
+            ["theo canyon depot"] = "Feo Canyon Depot",
+            ["stags"] = "Stag's Rut",
+            ["stags rut"] = "Stag's Rut",
+            ["carvers"] = "Carver's Ridge",
+            ["carvers ridge"] = "Carver's Ridge",
+            ["bullocks"] = "Bullock's Reach",
+            ["bullocks reach"] = "Bullock's Reach",
+            ["jacksons"] = "Jackson's Swap",
+            ["jacksons swap"] = "Jackson's Swap",
+            ["watchers"] = "Watcher's Depot",
+            ["watchers depot"] = "Watcher's Depot",
+            ["yangs"] = "Yang's Place",
+            ["yangs place"] = "Yang's Place",
+            ["blackrock"] = "Blackrock Exchange",
+            ["gray gardens"] = "Gray Gardens Depot",
+            ["grey gardens"] = "Gray Gardens Depot",
+            ["slowburn"] = "Slowburn Depot",
+            ["pharaoh"] = "Fairo",
+            ["faro"] = "Fairo",
+            ["farro"] = "Fairo",
+            ["viewer"] = "Vuur",
+            ["a deer"] = "Adir",
+            ["monarchs"] = "Monox",
             ["pyro 1"] = "Pyro I",
             ["pyro 2"] = "Monox",
             ["pyro 3"] = "Bloom",
@@ -173,20 +249,46 @@ namespace HCSWhisper
             ["jump town"] = "Jumptown",
             ["spk"] = "Security Post Kareah",
             ["kareah"] = "Security Post Kareah",
+            ["korea"] = "Security Post Kareah",
+            ["security post korea"] = "Security Post Kareah",
             ["klescher"] = "Klescher Rehabilitation Facility",
+            ["fletcher"] = "Klescher Rehabilitation Facility",
             ["prison"] = "Klescher Rehabilitation Facility",
             ["gundo"] = "Covalex Shipping Hub Gundo",
             ["covalex gundo"] = "Covalex Shipping Hub Gundo",
             ["brios"] = "Brio's Breaker Yard",
+            ["brioche"] = "Brio's Breaker Yard",
+            ["brioche breaker yard"] = "Brio's Breaker Yard",
             ["breaker yard"] = "Brio's Breaker Yard",
             ["samson"] = "Samson & Son's Salvage Center",
             ["samsons"] = "Samson & Son's Salvage Center",
             ["samson and sons"] = "Samson & Son's Salvage Center",
             ["devlin"] = "Devlin Scrap & Salvage",
             ["orinth"] = "Reclamation & Disposal Orinth",
+            ["corinth"] = "Reclamation & Disposal Orinth",
             ["dupree"] = "Dupree Industrial Manufacturing Facility",
             ["farnesway"] = "HDPC-Farnesway",
+            ["farms way"] = "HDPC-Farnesway",
+            ["farnsworth"] = "HDPC-Farnesway",
             ["cassillo"] = "HDPC-Cassillo",
+            ["castillo"] = "HDPC-Cassillo",
+            ["oparei"] = "HDMS-Oparei",
+            ["opera"] = "HDMS-Oparei",
+            ["bezdek"] = "HDMS-Bezdek",
+            ["best deck"] = "HDMS-Bezdek",
+            ["lathan"] = "HDMS-Lathan",
+            ["thedus"] = "HDMS-Thedus",
+            ["thetis"] = "HDMS-Thedus",
+            ["norgaard"] = "HDMS-Norgaard",
+            ["perlman"] = "HDMS-Perlman",
+            ["hahn"] = "HDMS-Hahn",
+            ["ryder"] = "HDMS-Ryder",
+            ["stanhope"] = "HDMS-Stanhope",
+            ["pinewood"] = "HDMS-Pinewood",
+            ["hadley"] = "HDMS-Hadley",
+            ["edmond"] = "HDMS-Edmond",
+            ["anderson"] = "HDMS-Anderson",
+            ["woodruff"] = "HDMS-Woodruff",
             ["magnolia"] = "Sakura Sun Magnolia Workcenter",
             ["goldenrod"] = "Sakura Sun Goldenrod Workcenter",
             ["anvik"] = "Rayari Anvik Research Outpost",
@@ -199,6 +301,8 @@ namespace HCSWhisper
             ["benson"] = "Benson Mining Outpost",
             ["tram and myers"] = "Tram & Myers Mining",
             ["kudre"] = "Kudre Ore",
+            ["could ray"] = "Kudre Ore",
+            ["could ray ore"] = "Kudre Ore",
             ["loveridge"] = "Loveridge Mineral Reserve",
             ["humboldt"] = "Humboldt Mines",
             ["buds"] = "Bud's Growery",
@@ -206,21 +310,44 @@ namespace HCSWhisper
             ["bountiful harvest"] = "Bountiful Harvest Hydroponics",
             ["shady glen"] = "Shady Glen Farms",
             ["gallete"] = "Gallete Family Farms",
+            ["gillette"] = "Gallete Family Farms",
+            ["gillette family farms"] = "Gallete Family Farms",
             ["terra mills"] = "Terra Mills HydroFarm",
             ["pickers"] = "Picker's Field",
             ["pickers field"] = "Picker's Field",
+            ["makers"] = "Maker's Point",
             ["makers point"] = "Maker's Point",
+            ["cutters"] = "Cutter's Rig",
             ["cutters rig"] = "Cutter's Rig",
+            ["finns"] = "Finn's Folly",
             ["finns folly"] = "Finn's Folly",
+            ["astors"] = "Astor's Clearing",
             ["astors clearing"] = "Astor's Clearing",
+            ["harpers"] = "Harper's Point",
             ["harpers point"] = "Harper's Point",
+            ["ravens"] = "Raven's Roost",
             ["ravens roost"] = "Raven's Roost",
             ["paradise cove"] = "Paradise Cove",
             ["necropolis"] = "The Necropolis",
             ["orphanage"] = "The Orphanage",
+            ["ghost"] = "Ghost Hollow",
+            ["repel"] = "Rappel",
+            ["new suit"] = "Nuiqsut Emergency Shelter",
+            ["nuiqsut"] = "Nuiqsut Emergency Shelter",
+            ["dunlow ridge"] = "Dunlow Ridge Aid Shelter",
+            ["barton flats"] = "Barton Flats Aid Shelter",
             ["dasi"] = "Wikelo Emporium Dasi Station",
+            ["daisy"] = "Wikelo Emporium Dasi Station",
             ["selo"] = "Wikelo Emporium Selo Station",
+            ["cello"] = "Wikelo Emporium Selo Station",
             ["kinga"] = "Wikelo Emporium Kinga Station",
+            ["left ski"] = "Levski",
+            ["glaciem alpha"] = "Transit Point Glaciem Alpha",
+            ["glaciem bravo"] = "Transit Point Glaciem Bravo",
+            ["glaciem charlie"] = "Transit Point Glaciem Charlie",
+            ["glacier alpha"] = "Transit Point Glaciem Alpha",
+            ["glacier bravo"] = "Transit Point Glaciem Bravo",
+            ["glacier charlie"] = "Transit Point Glaciem Charlie",
         };
 
         private static readonly Dictionary<string, string> BuiltInCommandAliases = new(StringComparer.OrdinalIgnoreCase)
@@ -258,7 +385,15 @@ namespace HCSWhisper
             }
 
             store ??= new NicknameStore();
-            bool addedAny = false;
+            bool changed = false;
+
+            // Clean up v1.1.0 ambiguous bare "dunlow" -> "Orison" default so "Downlow" & "Dunlow Ridge" don't collide
+            if (store.PlaceNicknames.TryGetValue("dunlow", out string existingDunlow) &&
+                string.Equals(existingDunlow, "Orison", StringComparison.OrdinalIgnoreCase))
+            {
+                store.PlaceNicknames.Remove("dunlow");
+                changed = true;
+            }
 
             // Merge new built-in defaults unless the user explicitly deleted or overrode them
             foreach (var kvp in BuiltInPlaceNicknames)
@@ -266,7 +401,7 @@ namespace HCSWhisper
                 if (!store.PlaceNicknames.ContainsKey(kvp.Key) && !store.RemovedDefaults.Contains("P:" + kvp.Key))
                 {
                     store.PlaceNicknames[kvp.Key] = kvp.Value;
-                    addedAny = true;
+                    changed = true;
                 }
             }
             foreach (var kvp in BuiltInCommandAliases)
@@ -274,11 +409,11 @@ namespace HCSWhisper
                 if (!store.CommandAliases.ContainsKey(kvp.Key) && !store.RemovedDefaults.Contains("C:" + kvp.Key))
                 {
                     store.CommandAliases[kvp.Key] = kvp.Value;
-                    addedAny = true;
+                    changed = true;
                 }
             }
 
-            if (addedAny || !File.Exists(file))
+            if (changed || !File.Exists(file))
                 store.Save(file);
 
             return store;

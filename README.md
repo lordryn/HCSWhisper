@@ -17,8 +17,10 @@ Windows Speech Recognition (SAPI) has been the weakest link in VoiceAttack for o
   * You say: `"open mobiGlas"` → Fires HCS: `"open mobi-glass"`
   * You say: `"activate mining slot 1"` → Fires HCS: `"Activate mining slot one"`
   * You say: `"Set a course for Arc-L5"` / `"ArcL5"` → Fires HCS: `"Plot a course to Yellow Core Station"`
-  * You say: `"Plot a course to Babbage"` / `"NB"` → Fires HCS: `"Plot a course to New Babbage"`
-  * You say: `"Plot a course to Ash"` → Fires HCS: `"Plot a course to Ashland"`
+  * You say: `"Plot a course to Babbage"` / `"New Beverage"` / `"NB"` → Fires HCS: `"Plot a course to New Babbage"`
+  * You say: `"Plot a course to Charles Beach"` / `"Saccharin's Plot"` → Unlocks & plots all **675 routable Star Citizen locations** (including the 490+ Pyro/Stanton/Nyx settlements omitted from HCS's SAPI grammar) via Double-Metaphone homophone matching!
+  * You say: `"Plot a course to Obituary"` / `"Horizon"` / `"Korea"` → Fires HCS: `Orbituary` / `Orison` / `Security Post Kareah`
+  * You say: `"toggle VR mode"` / `"set tips to leg"` / `"enable vital mode"` → Fires HCS: `"toggle vee ar mode"` / `"set pips to lag"` / `"Enable vtol mode"`
   * You say: `"disembark the ship"` → Fires HCS: `"dismebark the ship"` *(even works around typos in upstream trigger files!)*
   * **Safety Gate:** Destructive commands (`eject`, `self destruct`, `abandon`, `jettison`) require a strict `95%+` match so stray chatter never ejects you into space.
 * **Customizable Nicknames & Command Aliases:** Open the **Place Nicknames & Aliases** tab in the HCSWhisper tray window to view, search, add, edit, or import/export custom place nicknames (`"home base"` → `"Port Tressler"`) and full command aliases (`"punch it"` → `"engage quantum jump"`).

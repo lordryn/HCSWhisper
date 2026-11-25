@@ -1,6 +1,8 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -263,14 +265,22 @@ namespace HCSWhisper
                 if (match != null)
                 {
                     string matchTag = match.IsExact ? "exact" : $"fuzzy {match.Score * 100:F0}%";
-                    LogToVaAndUi($"Heard \"{match.RawText}\" → Executing \"{match.MatchedCommand}\" ({whisperMs} ms, {matchTag})", "green");
-                    try
+                    if (!string.IsNullOrEmpty(match.DynamicDestination))
                     {
-                        _proxy.Command.Execute(match.MatchedCommand, false, false, null, null, null, null, null, null);
+                        LogToVaAndUi($"Heard \"{match.RawText}\" → Plotting course to \"{match.DynamicDestination}\" ({whisperMs} ms, {matchTag})", "green");
+                        ExecuteDynamicStarCitizenPlot(match.DynamicDestination, match.MatchedCommand);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        LogToVaAndUi($"Failed executing '{match.MatchedCommand}': {ex.Message}", "red");
+                        LogToVaAndUi($"Heard \"{match.RawText}\" → Executing \"{match.MatchedCommand}\" ({whisperMs} ms, {matchTag})", "green");
+                        try
+                        {
+                            _proxy.Command.Execute(match.MatchedCommand, false, false, null, null, null, null, null, null);
+                        }
+                        catch (Exception ex)
+                        {
+                            LogToVaAndUi($"Failed executing '{match.MatchedCommand}': {ex.Message}", "red");
+                        }
                     }
                 }
                 else
@@ -292,6 +302,81 @@ namespace HCSWhisper
                     _trayIcon.Icon = recording ? _recIcon : _idleIcon;
             }
             catch { }
+        }
+
+        private static void ExecuteDynamicStarCitizenPlot(string destinationName, string slotCommandName)
+        {
+            try
+            {
+                string appsDir = null;
+                try { appsDir = _proxy.AppsDir; } catch { }
+                if (string.IsNullOrEmpty(appsDir))
+                    appsDir = Path.GetDirectoryName(_pluginDir);
+
+                string mfdDll = Path.Combine(appsDir ?? "", "HCS VoicePack Plugins", "HcsMfdLayouts.dll");
+                string mfdSettingsDir = ResolveHcsMfdSettingsFolder();
+                Directory.CreateDirectory(mfdSettingsDir);
+
+                Assembly mfdAsm = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => string.Equals(a.GetName().Name, "HcsMfdLayouts", StringComparison.OrdinalIgnoreCase))
+                    ?? Assembly.LoadFrom(mfdDll);
+
+                Type nsType = mfdAsm.GetType("Hcs.EventHorizon.Mfd.NavigationSettings", throwOnError: true);
+                MethodInfo loadM = nsType.GetMethod("Load", BindingFlags.Public | BindingFlags.Static);
+                MethodInfo customPhraseM = nsType.GetMethod("CustomPhrase", BindingFlags.Public | BindingFlags.Instance);
+                MethodInfo customTextM = nsType.GetMethod("CustomText", BindingFlags.Public | BindingFlags.Instance);
+                MethodInfo setCustomM = nsType.GetMethod("SetCustom", BindingFlags.Public | BindingFlags.Instance);
+                MethodInfo saveM = nsType.GetMethod("Save", BindingFlags.Public | BindingFlags.Instance);
+
+                object settingsObj = loadM.Invoke(null, new object[] { mfdSettingsDir });
+                string prevPhrase = (customPhraseM.Invoke(settingsObj, new object[] { 10 }) as string) ?? "";
+                string prevText = (customTextM.Invoke(settingsObj, new object[] { 10 }) as string) ?? "";
+
+                // Write dynamic destination into slot 10 and invoke Event Horizon's native hcsvtSC_Plot_Custom_10 -> ((SC Map - Plot Flow))
+                setCustomM.Invoke(settingsObj, new object[] { 10, "hcswhisper dynamic route", destinationName.Trim('"') });
+                saveM.Invoke(settingsObj, new object[] { mfdSettingsDir });
+
+                _proxy.Command.Execute(slotCommandName, false, false, null, null, null, null, null, null);
+
+                // Restore any prior user Customiser slot 10 value once nav.custom10 has read navigation.json
+                if (!string.Equals(prevPhrase, "hcswhisper dynamic route", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(3500).ConfigureAwait(false);
+                            object latest = loadM.Invoke(null, new object[] { mfdSettingsDir });
+                            setCustomM.Invoke(latest, new object[] { 10, prevPhrase, prevText });
+                            saveM.Invoke(latest, new object[] { mfdSettingsDir });
+                        }
+                        catch { }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                LogToVaAndUi($"Dynamic route dispatch failed for '{destinationName}': {ex.Message}", "red");
+            }
+        }
+
+        private static string ResolveHcsMfdSettingsFolder()
+        {
+            try
+            {
+                Assembly hcsPluginAsm = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => string.Equals(a.GetName().Name, "HCSPlugin", StringComparison.OrdinalIgnoreCase));
+                Type nvType = hcsPluginAsm?.GetType("HCSPlugin.NavVoice");
+                MethodInfo sfMethod = nvType?.GetMethod("SettingsFolder", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                string liveDir = sfMethod?.Invoke(null, null) as string;
+                if (!string.IsNullOrWhiteSpace(liveDir))
+                    return liveDir;
+            }
+            catch { }
+
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "VoiceAttack", "HCS VoicePacks", "MFD Layouts");
         }
 
         private static bool IsCrewAudioPlaying()

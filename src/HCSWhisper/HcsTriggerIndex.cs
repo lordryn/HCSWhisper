@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -100,6 +102,19 @@ namespace HCSWhisper
             (new Regex(@"\bcounter\s+measures?\b", RegexOptions.Compiled), "countermeasure"),
             (new Regex(@"\bre\s+spawn\b", RegexOptions.Compiled), "respawn"),
             (new Regex(@"\bflash\s+light\b", RegexOptions.Compiled), "flashlight"),
+            // Course plotting phrasing normalizations ("plotting course" -> "plot a course")
+            (new Regex(@"\bplotting\s+(?:a\s+)?(course|route)\b", RegexOptions.Compiled), "plot a $1"),
+            (new Regex(@"\bplot\s+(course|route)\b", RegexOptions.Compiled), "plot a $1"),
+            (new Regex(@"\bsetting\s+(?:a\s+)?(course|route)\b", RegexOptions.Compiled), "set a $1"),
+            (new Regex(@"\bset\s+(course|route)\b", RegexOptions.Compiled), "set a $1"),
+            // Star Citizen location homophones & compound names
+            (new Regex(@"\bnew\s+(?:beverage|vavage|bavage|cabbage|baggage|babidge|babage)\b", RegexOptions.Compiled), "new babbage"),
+            (new Regex(@"\b(?:everest|everis)\s+harbou?r\b", RegexOptions.Compiled), "everus harbor"),
+            (new Regex(@"\beverus\s+harbour\b", RegexOptions.Compiled), "everus harbor"),
+            (new Regex(@"\b(?:by\s+genie|bi\s+jini|bai\s+jini)\b", RegexOptions.Compiled), "baijini"),
+            (new Regex(@"\bmicro\s+tech\b", RegexOptions.Compiled), "microtech"),
+            (new Regex(@"\b(?:arc|ark)\s+corp\b", RegexOptions.Compiled), "arccorp"),
+            (new Regex(@"\bgrim\s*hex\b", RegexOptions.Compiled), "grim hex"),
         };
 
         private static readonly Dictionary<string, string> SingleWordNormalizations = new(StringComparer.Ordinal)
@@ -118,6 +133,29 @@ namespace HCSWhisper
             ["recentre"] = "recenter",
             ["heatsinks"] = "heatsink",
             ["countermeasures"] = "countermeasure",
+            // Star Citizen single-word place homophones
+            ["vavage"] = "babbage",
+            ["bavage"] = "babbage",
+            ["babidge"] = "babbage",
+            ["laureville"] = "lorville",
+            ["loreville"] = "lorville",
+            ["lawville"] = "lorville",
+            ["lorvil"] = "lorville",
+            ["orizon"] = "orison",
+            ["orizen"] = "orison",
+            ["tresler"] = "tressler",
+            ["trestler"] = "tressler",
+            ["bijini"] = "baijini",
+            ["baigini"] = "baijini",
+            ["serafim"] = "seraphim",
+            ["levsky"] = "levski",
+            ["hursten"] = "hurston",
+            ["arcorp"] = "arccorp",
+            ["arkcorp"] = "arccorp",
+            ["calliopi"] = "calliope",
+            ["yella"] = "yela",
+            ["celin"] = "cellin",
+            ["selen"] = "cellin",
             ["twenny"] = "twenty",
             ["sevenny"] = "seventy",
             ["0"] = "zero",
@@ -192,8 +230,177 @@ namespace HCSWhisper
                 IndexSingleHcsFile(file, liveVaGetText);
             }
 
+            // If Event Horizon is loaded, dynamically ingest Star Citizen routable locations from HcsMfdLayouts.dll!
+            if (loadedPackNames.Any(p => p.Contains("Event Horizon", StringComparison.OrdinalIgnoreCase)))
+            {
+                IndexStarCitizenNavigationPlaces(vaAppsDir, liveVaCommandExists);
+            }
+
             ActivePackSummary = $"{string.Join(" + ", loadedPackNames)} ({TotalCommandsCount:N0} commands / {_allEntries.Count:N0} phrases)";
             WhisperPrompt = BuildPromptForPacks(loadedPackNames);
+        }
+
+        private void IndexStarCitizenNavigationPlaces(string vaAppsDir, Func<string, bool> liveVaCommandExists)
+        {
+            var placeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // 1. Dynamically extract all routable Star Citizen places from HCS's own HcsMfdLayouts.dll (auto-updates with SC patches!)
+            try
+            {
+                string mfdDll = Path.Combine(vaAppsDir ?? "", "HCS VoicePack Plugins", "HcsMfdLayouts.dll");
+                if (File.Exists(mfdDll))
+                {
+                    string hcsPluginDir = Path.GetDirectoryName(mfdDll);
+                    ResolveEventHandler handler = (_, e) =>
+                    {
+                        string dep = Path.Combine(hcsPluginDir, new AssemblyName(e.Name).Name + ".dll");
+                        return File.Exists(dep) ? Assembly.LoadFrom(dep) : null;
+                    };
+                    AppDomain.CurrentDomain.AssemblyResolve += handler;
+                    try
+                    {
+                        Assembly asm = Assembly.LoadFrom(mfdDll);
+                        Type npType = asm.GetType("Hcs.EventHorizon.Mfd.NavigationPlaces");
+                        object shared = npType?.GetProperty("Shared", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null);
+                        FieldInfo routableField = npType?.GetField("routable", BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (shared != null && routableField?.GetValue(shared) is IEnumerable routableList)
+                        {
+                            foreach (object placeObj in routableList)
+                            {
+                                string name = placeObj?.GetType().GetProperty("Name")?.GetValue(placeObj) as string;
+                                if (!string.IsNullOrWhiteSpace(name) && !name.Contains('#'))
+                                {
+                                    placeNames.Add(name.Trim());
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        AppDomain.CurrentDomain.AssemblyResolve -= handler;
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback to core list below if HcsMfdLayouts internals ever change
+            }
+
+            // 2. Always ensure core Stanton / Pyro / Nyx hubs & common short names are present
+            string[] corePlaces =
+            {
+                "New Babbage", "Lorville", "Orison", "Area18", "Area 18",
+                "Port Tressler", "Everus Harbor", "Baijini Point", "Seraphim Station", "Seraphim",
+                "Grim HEX", "Grim Hex", "Ruin Station", "Orbituary", "Checkmate", "Patch City",
+                "Levski", "Stanton Gateway", "Pyro Gateway", "Nyx Gateway", "Terra Gateway",
+                "Hurston", "Crusader", "ArcCorp", "microTech", "Pyro", "Nyx",
+                "Bloom", "Monox", "Terminus", "Ignis", "Vatra", "Adir", "Fairo", "Fuego", "Vuur",
+                "Daymar", "Yela", "Cellin", "Aberdeen", "Arial", "Magda", "Ita",
+                "Lyria", "Wala", "Calliope", "Clio", "Euterpe",
+                "Brio's Breaker Yard", "Ashland", "Golden Riviera", "Gaslight", "Starlight Service Station",
+                "Anvik", "Cantwell", "Kaltag", "McGrath",
+                "HUR-L1", "HUR-L2", "HUR-L3", "HUR-L4", "HUR-L5",
+                "CRU-L1", "CRU-L4", "CRU-L5",
+                "ARC-L1", "ARC-L2", "ARC-L3", "ARC-L4", "ARC-L5",
+                "MIC-L1", "MIC-L2", "MIC-L3", "MIC-L4", "MIC-L5"
+            };
+            foreach (string cp in corePlaces) placeNames.Add(cp);
+
+            // Expand station short/long aliases (e.g. "HUR-L1 Green Glade Station" -> also try "Green Glade Station" & "HUR-L1")
+            var expandedPlaces = new HashSet<string>(placeNames, StringComparer.OrdinalIgnoreCase);
+            var lagrangeRegex = new Regex(@"^([A-Z]{3}-L\d)\s+(.+)$", RegexOptions.Compiled);
+            foreach (string p in placeNames)
+            {
+                var m = lagrangeRegex.Match(p);
+                if (m.Success)
+                {
+                    expandedPlaces.Add(m.Groups[1].Value);
+                    expandedPlaces.Add(m.Groups[1].Value.Replace("-", " "));
+                    expandedPlaces.Add(m.Groups[2].Value);
+                }
+                if (p.Equals("Area18", StringComparison.OrdinalIgnoreCase))
+                    expandedPlaces.Add("Area 18");
+            }
+
+            string[] plotPrefixes = { "Plot a course to ", "Plot course to ", "Set a course to ", "Set course to ", "Plot a route to ", "Set a route to " };
+            int addedDestinations = 0;
+
+            foreach (string place in expandedPlaces)
+            {
+                string winningCommand = null;
+                if (liveVaCommandExists != null)
+                {
+                    foreach (string pfx in plotPrefixes)
+                    {
+                        string candidateCmd = pfx + place;
+                        if (SafeVaExists(liveVaCommandExists, candidateCmd))
+                        {
+                            winningCommand = candidateCmd;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    winningCommand = "Plot a course to " + place;
+                }
+
+                if (winningCommand == null)
+                    continue;
+
+                addedDestinations++;
+                TotalCommandsCount++;
+
+                // Index natural spoken variations ("plot a course to X", "set a course to X", "plot a route to X")
+                // all pointing directly to the verified VoiceAttack command!
+                foreach (string spokenPrefix in new[] { "plot a course to ", "set a course to ", "plot a route to ", "plot a course for " })
+                {
+                    IndexDirectPhrase(spokenPrefix + place, winningCommand, $"Plot course: {place}");
+                }
+            }
+        }
+
+        private void IndexDirectPhrase(string spokenForm, string rawCommandToExecute, string friendlyName)
+        {
+            string canonical = Canonicalize(spokenForm);
+            if (canonical.Length == 0)
+                return;
+
+            string[] tokens = canonical.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            string[] phonetics = tokens.Select(ToSoundexKey).ToArray();
+
+            var entry = new IndexedEntry
+            {
+                Canonical = canonical,
+                Tokens = tokens,
+                PhoneticTokens = phonetics,
+                RawPhrase = rawCommandToExecute,
+                FriendlyName = friendlyName,
+                IsDangerous = false
+            };
+
+            if (!_exactMap.TryGetValue(canonical, out var bucket))
+            {
+                bucket = new List<IndexedEntry>(1);
+                _exactMap[canonical] = bucket;
+            }
+            if (bucket.Any(b => string.Equals(b.RawPhrase, rawCommandToExecute, StringComparison.OrdinalIgnoreCase)))
+                return;
+
+            bucket.Add(entry);
+            int idx = _allEntries.Count;
+            _allEntries.Add(entry);
+
+            foreach (string tok in tokens.Distinct())
+            {
+                if (tok.Length < 2) continue;
+                if (!_tokenInvertedIndex.TryGetValue(tok, out var postList))
+                {
+                    postList = new List<int>();
+                    _tokenInvertedIndex[tok] = postList;
+                }
+                postList.Add(idx);
+            }
         }
 
         private static List<string> SelectMatchingHcsFiles(string[] files, string profileName, Func<string, bool> commandExists)
@@ -561,6 +768,9 @@ namespace HCSWhisper
 
             string s = WhisperArtifactRegex.Replace(input, " ").ToLowerInvariant();
             s = s.Replace("%", " percent ").Replace("-", " ").Replace("'", "");
+            // Split attached letter+digit boundaries like "Area18" -> "area 18" so "Area 18" and "Area18" match identically
+            s = Regex.Replace(s, @"([a-z])(\d)", "$1 $2");
+            s = Regex.Replace(s, @"(\d)([a-z])", "$1 $2");
             s = NonWordCleanRegex.Replace(s, " ");
             s = MultiSpaceRegex.Replace(s, " ").Trim();
             if (s.Length == 0)
@@ -865,11 +1075,10 @@ namespace HCSWhisper
         {
             if (packs.Any(p => p.Contains("Event Horizon", StringComparison.OrdinalIgnoreCase)))
             {
-                return "Star Citizen ship voice commands: MFD, IFCS, SCM mode, NAV mode, mobiGlas, Quantum Drive, " +
-                       "spool quantum drive, despool, engage jump, gimbal, gimbals free, decoupled, flight assist, " +
-                       "chaff, flare, shields, power management, turret ESP, turret gyro, salvage mode, fracture mode, " +
-                       "disintegrate mode, mining laser, mining slot one, extraction, tractor beam, landing gear, airlock, " +
-                       "Hurston, Crusader, ArcCorp, microTech, Pyro, Astra, Vega, Orion, Vulcan, Carina, Eli, Vasco, Verity.";
+                return "Star Citizen voice commands: Plot a course to New Babbage, Lorville, Orison, Area 18, Port Tressler, " +
+                       "Everus Harbor, Baijini Point, Seraphim Station, Grim HEX, Ruin Station, Orbituary, Checkmate, Levski, " +
+                       "Hurston, Crusader, ArcCorp, microTech, Pyro, Nyx, Daymar, Yela, Cellin, Calliope, Clio, Euterpe, " +
+                       "Aberdeen, Lyria, Wala, MFD, IFCS, SCM, mobiGlas, Quantum Drive, spool, despool, gimbal, decoupled, chaff.";
             }
             if (packs.Any(p => p.Contains("Singularity", StringComparison.OrdinalIgnoreCase)))
             {
